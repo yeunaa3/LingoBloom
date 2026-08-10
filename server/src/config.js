@@ -45,6 +45,16 @@ export const config = {
     baseUrl:
       process.env.DICTIONARY_API_BASE_URL ||
       "https://api.dictionaryapi.dev/api/v2/entries",
+    suggestionBaseUrl:
+      process.env.DICTIONARY_SUGGEST_API_BASE_URL ||
+      "https://api.datamuse.com/sug",
+    translationBaseUrl:
+      process.env.DICTIONARY_TRANSLATION_API_BASE_URL ||
+      "https://api.mymemory.translated.net/get",
+    selectionTtlSeconds: Math.max(
+      60,
+      Math.min(900, Number(process.env.DICTIONARY_SELECTION_TTL_SECONDS || 300) || 300),
+    ),
   },
   serveClient: bool(process.env.SERVE_CLIENT, true),
   nodeEnv: process.env.NODE_ENV || "development",

@@ -92,7 +92,11 @@ export async function createApp(options = {}) {
   app.use("/api/users/me", profileRoutes({ db }));
   app.use("/api", contentRoutes({ db }));
   app.use("/api/import", importRoutes({ db }));
-  app.use("/api/dictionary", dictionaryRoutes({ db, service: dictionaryService }));
+  app.use("/api/dictionary", dictionaryRoutes({
+    db,
+    service: dictionaryService,
+    config: runtimeConfig,
+  }));
   app.use("/api/reviews", reviewRoutes({ db }));
   app.use("/api/stats", statsRoutes({ db, timeZoneOffsetMinutes: runtimeConfig.timeZoneOffsetMinutes }));
 

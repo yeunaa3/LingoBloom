@@ -103,6 +103,63 @@ function createdWithinReviewRange(item, range, fromDate = '', toDate = '') {
   return false;
 }
 
+function wordLanguagePair(word) {
+  return {
+    learningLanguage: word.learningLanguage || word.language || 'en',
+    nativeLanguage: word.nativeLanguage || 'vi',
+  };
+}
+
+function buildQuizDirections(words) {
+  const pairs = new Map();
+  words.filter(hasUsableQuizTranslation).forEach((word) => {
+    const pair = wordLanguagePair(word);
+    if (pair.learningLanguage === pair.nativeLanguage) return;
+    const key = `${pair.learningLanguage}|${pair.nativeLanguage}`;
+    const current = pairs.get(key) || { ...pair, count: 0 };
+    current.count += 1;
+    pairs.set(key, current);
+  });
+
+  return [...pairs.values()].flatMap((pair) => [
+    {
+      key: `${pair.learningLanguage}>${pair.nativeLanguage}|${pair.learningLanguage}|${pair.nativeLanguage}`,
+      ...pair,
+      promptLanguage: pair.learningLanguage,
+      answerLanguage: pair.nativeLanguage,
+      promptField: 'term',
+      answerField: 'translation',
+    },
+    {
+      key: `${pair.nativeLanguage}>${pair.learningLanguage}|${pair.learningLanguage}|${pair.nativeLanguage}`,
+      ...pair,
+      promptLanguage: pair.nativeLanguage,
+      answerLanguage: pair.learningLanguage,
+      promptField: 'translation',
+      answerField: 'term',
+    },
+  ]);
+}
+
+function wordMatchesQuizDirection(word, direction) {
+  if (!direction || !hasUsableQuizTranslation(word)) return false;
+  const pair = wordLanguagePair(word);
+  return pair.learningLanguage === direction.learningLanguage && pair.nativeLanguage === direction.nativeLanguage;
+}
+
+function quizCardContent(card, direction) {
+  const prompt = direction?.promptField === 'translation' ? card.translation : card.term;
+  const answer = direction?.answerField === 'translation' ? card.translation : card.term;
+  const alternatives = direction?.answerField === 'translation'
+    ? [answer, ...String(answer || '').split(/[;,|]/)]
+    : [answer];
+  return {
+    prompt,
+    answer,
+    acceptedAnswers: [...new Set(alternatives.map((value) => normalizedText(value, direction?.answerLanguage || 'vi')).filter(Boolean))],
+  };
+}
+
 function greeting() {
   const hour = new Date().getHours();
   if (hour < 11) return 'Chào buổi sáng';
@@ -519,45 +576,206 @@ function TextField({ label, hint, multiline = false, ...props }) {
   );
 }
 
-function WordForm({ user, onCreated, notify }) {
-  const initial = { term: '', translation: '', pronunciation: '', partOfSpeech: '', example: '', notes: '' };
-  const [form, setForm] = useState(initial);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+function normalizedText(value, locale = 'vi') {
+  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase(locale);
+}
 
-  function update(key, value) { setForm((current) => ({ ...current, [key]: value })); }
+function isSelectableDictionaryCandidate(item) {
+  const term = normalizedText(item?.term);
+  return Boolean(term && item?.selectable !== false && (item?.selectionToken || String(item?.id || '').startsWith('demo-dictionary-')));
+}
+
+function hasUsableQuizTranslation(item) {
+  const term = normalizedText(item?.term);
+  const translation = normalizedText(item?.translation);
+  const comparableTerm = term.replace(/[.,!?…;:]+$/u, '');
+  const comparableTranslation = translation.replace(/[.,!?…;:]+$/u, '');
+  if (!term || !translation || comparableTerm === comparableTranslation) return false;
+  const placeholder = translation.replace(/[.!?…]+$/u, '');
+  return !/^(chưa (có|thêm) nghĩa|không có nghĩa|no (translation|definition)|translation unavailable|unknown|pending|n\/a|[-–—])$/i.test(placeholder);
+}
+
+function WordForm({ user, onCreated, notify }) {
+  const learningLanguage = userLanguage(user, 'learningLanguage', 'en');
+  const nativeLanguage = userLanguage(user, 'nativeLanguage', 'vi');
+  const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [error, setError] = useState('');
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const requestSequence = useRef(0);
+  const listboxId = 'word-dictionary-suggestions';
+  const trimmedQuery = query.trim();
+
+  useEffect(() => {
+    const sequence = ++requestSequence.current;
+    if (selected || trimmedQuery.length < 2) {
+      setSuggestions([]);
+      setLoading(false);
+      setSearched(false);
+      setActiveIndex(-1);
+      return undefined;
+    }
+
+    setLoading(true);
+    setError('');
+    const timer = window.setTimeout(async () => {
+      try {
+        const found = await api.suggestDictionary(trimmedQuery, { learningLanguage, nativeLanguage });
+        if (requestSequence.current !== sequence) return;
+        const usable = found.filter(isSelectableDictionaryCandidate);
+        setSuggestions(usable);
+        setActiveIndex(usable.length ? 0 : -1);
+        setSearched(true);
+      } catch (caught) {
+        if (requestSequence.current !== sequence) return;
+        setSuggestions([]);
+        setActiveIndex(-1);
+        setSearched(true);
+        setError(caught.message);
+      } finally {
+        if (requestSequence.current === sequence) setLoading(false);
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [learningLanguage, nativeLanguage, selected, trimmedQuery]);
+
+  function changeQuery(value) {
+    setQuery(value);
+    setSelected(null);
+    setError('');
+  }
+
+  function chooseSuggestion(item) {
+    setSelected(item);
+    setQuery(item.term);
+    setSuggestions([]);
+    setActiveIndex(-1);
+    setError('');
+  }
+
+  function handleInputKeyDown(event) {
+    if (!suggestions.length) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((current) => (current + 1) % suggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((current) => (current <= 0 ? suggestions.length - 1 : current - 1));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      chooseSuggestion(suggestions[Math.max(0, activeIndex)]);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setSuggestions([]);
+      setActiveIndex(-1);
+    }
+  }
+
   async function submit(event) {
     event.preventDefault();
-    setLoading(true); setError('');
+    if (!selected) {
+      setError('Hãy chọn một gợi ý từ từ điển trước khi lưu.');
+      return;
+    }
+    setSaving(true);
+    setError('');
     try {
-      const created = await api.createWord({
-        ...form,
-        learningLanguage: userLanguage(user, 'learningLanguage', 'en'),
-        nativeLanguage: userLanguage(user, 'nativeLanguage', 'vi'),
-      });
+      const created = await api.importDictionary(selected, { learningLanguage, nativeLanguage });
       onCreated(created);
-      setForm(initial);
+      setQuery('');
+      setSelected(null);
+      setSuggestions([]);
+      setSearched(false);
       notify(`Đã thêm “${created.term}” vào thư viện.`);
-    } catch (caught) { setError(caught.message); }
-    finally { setLoading(false); }
+    } catch (caught) {
+      setError(caught.message);
+      const code = caught.payload?.error?.code || '';
+      if (['INVALID_DICTIONARY_SELECTION', 'DICTIONARY_SELECTION_EXPIRED', 'DICTIONARY_SELECTION_NOT_VERIFIED'].includes(code)) {
+        setSelected(null);
+        setSearched(false);
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <form onSubmit={submit}>
-      <FormIntro icon={BookOpen} title="Thêm một từ vựng" description="Từ và nghĩa là đủ để bắt đầu; các mục khác có thể bổ sung sau." />
-      <div className="form-grid form-grid--two">
-        <TextField name="term" label="Từ mới" placeholder="Ví dụ: serendipity" value={form.term} onChange={(e) => update('term', e.target.value)} required autoFocus />
-        <TextField name="translation" label="Nghĩa" placeholder="Ví dụ: sự tình cờ may mắn" value={form.translation} onChange={(e) => update('translation', e.target.value)} required />
-        <TextField name="pronunciation" label="Phiên âm" placeholder="/ˌser.ənˈdɪp.ə.ti/" value={form.pronunciation} onChange={(e) => update('pronunciation', e.target.value)} />
-        <label className="field" htmlFor="partOfSpeech">
-          <span className="field__label">Từ loại</span>
-          <span className="select-wrap"><select id="partOfSpeech" value={form.partOfSpeech} onChange={(e) => update('partOfSpeech', e.target.value)}><option value="">Chọn từ loại</option><option>danh từ</option><option>động từ</option><option>tính từ</option><option>trạng từ</option><option>cụm từ</option><option>khác</option></select><ChevronDown size={18} /></span>
+    <form onSubmit={submit} className="word-typeahead-form">
+      <FormIntro icon={BookOpen} title="Thêm từ bằng từ điển" description="Gõ từ đang học, rồi chọn đúng gợi ý. Nghĩa, phiên âm và ví dụ sẽ được lưu cùng từ." />
+      <div className="word-typeahead">
+        <label className="field" htmlFor="word-typeahead-input">
+          <span className="field__label">Từ bạn muốn thêm <b aria-hidden="true">*</b></span>
+          <span className="typeahead-input-wrap">
+            <Search size={19} aria-hidden="true" />
+            <input
+              id="word-typeahead-input"
+              type="text"
+              value={query}
+              onChange={(event) => changeQuery(event.target.value)}
+              onKeyDown={handleInputKeyDown}
+              placeholder="Ví dụ: resilient"
+              autoComplete="off"
+              autoFocus
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={Boolean(!selected && suggestions.length)}
+              aria-controls={listboxId}
+              aria-activedescendant={activeIndex >= 0 ? `word-suggestion-${activeIndex}` : undefined}
+              aria-describedby="word-typeahead-help"
+            />
+            {loading && <LoaderCircle className="spin" size={18} aria-label="Đang tìm gợi ý" />}
+          </span>
+          <small className="field__hint" id="word-typeahead-help">
+            {languageByCode(learningLanguage).name} → {languageByCode(nativeLanguage).name} · Gõ ít nhất 2 ký tự.
+          </small>
         </label>
+
+        {!selected && suggestions.length > 0 && (
+          <div className="typeahead-menu" id={listboxId} role="listbox" aria-label="Gợi ý từ từ điển">
+            {suggestions.map((item, index) => (
+              <button
+                type="button"
+                id={`word-suggestion-${index}`}
+                role="option"
+                aria-selected={activeIndex === index}
+                className={activeIndex === index ? 'is-active' : ''}
+                key={`${item.dictionaryEntryIndex ?? index}-${item.term}`}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => chooseSuggestion(item)}
+              >
+                <span><strong>{item.term}</strong>{item.pronunciation && <small>{item.pronunciation}</small>}</span>
+                <span>{item.translation || 'Nghĩa và phiên âm sẽ được tự động bổ sung khi lưu.'}</span>
+                {item.partOfSpeech && <em>{item.partOfSpeech}</em>}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="typeahead-status" role="status" aria-live="polite">
+          {!selected && loading && <span><LoaderCircle className="spin" size={16} /> Đang tìm trong từ điển…</span>}
+          {!selected && !loading && searched && !error && !suggestions.length && <span><Search size={16} /> Chưa có gợi ý phù hợp. Hãy kiểm tra chính tả hoặc thử từ khác.</span>}
+          {!selected && !loading && !searched && trimmedQuery.length < 2 && <span><Sparkles size={16} /> Gợi ý sẽ xuất hiện khi bạn bắt đầu gõ.</span>}
+        </div>
+
+        {selected && (
+          <article className="typeahead-selected" aria-label="Từ đã chọn">
+            <span className="typeahead-selected__check"><Check size={18} aria-hidden="true" /></span>
+            <div>
+              <div><strong>{selected.term}</strong>{selected.pronunciation && <small>{selected.pronunciation}</small>}{selected.partOfSpeech && <em>{selected.partOfSpeech}</em>}</div>
+              <p>{selected.translation || 'Nghĩa và phiên âm sẽ được tự động bổ sung khi lưu.'}</p>
+              {selected.example && <q>{selected.example}</q>}
+            </div>
+            <button type="button" aria-label="Bỏ lựa chọn" onClick={() => changeQuery(query)}><X size={18} /></button>
+          </article>
+        )}
       </div>
-      <TextField name="example" label="Câu ví dụ" placeholder="Finding this café was pure serendipity." value={form.example} onChange={(e) => update('example', e.target.value)} multiline rows="3" />
-      <TextField name="notes" label="Ghi chú" placeholder="Mẹo nhớ, ngữ cảnh hoặc liên tưởng của riêng bạn…" value={form.notes} onChange={(e) => update('notes', e.target.value)} multiline rows="3" />
       {error && <div className="inline-alert inline-alert--error" role="alert"><CircleAlert size={18} />{error}</div>}
-      <div className="form-actions"><Button type="submit" loading={loading} icon={Plus}>Lưu từ vựng</Button></div>
+      <div className="form-actions"><Button type="submit" loading={saving} disabled={!selected} icon={Plus}>Lưu từ đã chọn</Button></div>
     </form>
   );
 }
@@ -701,7 +919,7 @@ function DictionaryLookup({ user, onCreated, notify }) {
         learningLanguage: userLanguage(user, 'learningLanguage', 'en'),
         nativeLanguage: userLanguage(user, 'nativeLanguage', 'vi'),
       });
-      setResults(found);
+      setResults(found.filter(isSelectableDictionaryCandidate));
     } catch (caught) { setError(caught.message); setResults([]); }
     finally { setLoading(false); }
   }
@@ -709,13 +927,7 @@ function DictionaryLookup({ user, onCreated, notify }) {
   async function addResult(item) {
     setAddingId(item.id); setError('');
     try {
-      const created = await api.createWord({
-        term: item.term,
-        translation: item.translation || 'Chưa thêm nghĩa',
-        pronunciation: item.pronunciation || '',
-        partOfSpeech: item.partOfSpeech || '',
-        example: item.example || '',
-        notes: item.source ? `Nguồn: ${item.source}` : '',
+      const created = await api.importDictionary(item, {
         learningLanguage: userLanguage(user, 'learningLanguage', 'en'),
         nativeLanguage: userLanguage(user, 'nativeLanguage', 'vi'),
       });
@@ -724,15 +936,9 @@ function DictionaryLookup({ user, onCreated, notify }) {
     finally { setAddingId(''); }
   }
 
-  function updateTranslation(index, value) {
-    setResults((current) => current.map((item, itemIndex) => (
-      itemIndex === index ? { ...item, translation: value } : item
-    )));
-  }
-
   return (
     <div>
-      <FormIntro icon={Search} title="Tra từ điển" description="Tìm qua dịch vụ đã cấu hình, chỉnh nghĩa cho phù hợp rồi lưu vào thư viện." />
+      <FormIntro icon={Search} title="Tra từ điển" description="Chọn kết quả đã xác thực; hệ thống sẽ tự bổ sung nghĩa, phiên âm và ví dụ khi lưu." />
       <form className="dictionary-search" onSubmit={search} role="search">
         <label className="search-field search-field--large">
           <Search size={20} aria-hidden="true" />
@@ -749,17 +955,12 @@ function DictionaryLookup({ user, onCreated, notify }) {
             {results.map((item, index) => (
               <article className="dictionary-result" key={`${item.id}-${index}`}>
                 <div className="dictionary-result__top"><div><h3>{item.term}</h3>{item.pronunciation && <span>{item.pronunciation}</span>}</div>{item.partOfSpeech && <small>{item.partOfSpeech}</small>}</div>
-                <label className="dictionary-edit">
-                  <span>Nghĩa sẽ lưu</span>
-                  <textarea
-                    rows="2"
-                    value={item.translation || ''}
-                    onChange={(event) => updateTranslation(index, event.target.value)}
-                    placeholder="Nhập nghĩa bằng ngôn ngữ mẹ đẻ…"
-                  />
-                </label>
+                <div className="dictionary-edit">
+                  <span>Nghĩa từ từ điển</span>
+                  <p>{item.translation || 'Nghĩa sẽ được tự động bổ sung khi lưu.'}</p>
+                </div>
                 {item.example && <blockquote>{item.example}</blockquote>}
-                <Button variant="soft" onClick={() => addResult(item)} loading={addingId === item.id} disabled={!item.translation?.trim()} icon={Plus}>Lưu vào thư viện</Button>
+                <Button variant="soft" onClick={() => addResult(item)} loading={addingId === item.id} icon={Plus}>Lưu vào thư viện</Button>
               </article>
             ))}
           </div>
@@ -875,7 +1076,16 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
     ...words.map((item) => ({ ...item, reviewType: 'word' })),
     ...structures.map((item) => ({ ...item, reviewType: 'structure' })),
   ].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)), [words, structures]);
-  const dueDeck = useMemo(() => allDeck.filter(dueForReview), [allDeck]);
+  const quizDirections = useMemo(() => buildQuizDirections(words), [words]);
+  const [reviewStyle, setReviewStyle] = useState('flashcard');
+  const [quizDirectionKey, setQuizDirectionKey] = useState('');
+  const activeQuizDirection = quizDirections.find((direction) => direction.key === quizDirectionKey) || quizDirections[0] || null;
+  const modeDeck = useMemo(() => (
+    reviewStyle === 'typed'
+      ? allDeck.filter((item) => item.reviewType === 'word' && wordMatchesQuizDirection(item, activeQuizDirection))
+      : allDeck
+  ), [activeQuizDirection, allDeck, reviewStyle]);
+  const dueDeck = useMemo(() => modeDeck.filter(dueForReview), [modeDeck]);
   const [deck, setDeck] = useState([]);
   const [choosing, setChoosing] = useState(true);
   const [range, setRange] = useState('due');
@@ -890,8 +1100,25 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
   const [finished, setFinished] = useState(false);
   const [reviewedCount, setReviewedCount] = useState(0);
   const [message, setMessage] = useState('');
+  const [sessionStyle, setSessionStyle] = useState('flashcard');
+  const [sessionDirection, setSessionDirection] = useState(null);
+  const [typedAnswer, setTypedAnswer] = useState('');
+  const [typedResult, setTypedResult] = useState(null);
   const selectionTouched = useRef(false);
+  const typedSubmission = useRef('');
   const card = deck[index];
+  const typedContent = card && sessionStyle === 'typed' ? quizCardContent(card, sessionDirection) : null;
+
+  useEffect(() => {
+    if (!quizDirections.length) {
+      setQuizDirectionKey('');
+      if (reviewStyle === 'typed') setReviewStyle('flashcard');
+      return;
+    }
+    if (!quizDirections.some((direction) => direction.key === quizDirectionKey)) {
+      setQuizDirectionKey(quizDirections[0].key);
+    }
+  }, [quizDirectionKey, quizDirections, reviewStyle]);
 
   useEffect(() => {
     if (!selectionTouched.current && choosing) setSelectedKeys(new Set(dueDeck.map(reviewCardKey)));
@@ -906,22 +1133,23 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
   }, [allDeck]);
 
   const rangeDeck = useMemo(
-    () => allDeck.filter((item) => createdWithinReviewRange(item, range, customFrom, customTo)),
-    [allDeck, range, customFrom, customTo],
+    () => modeDeck.filter((item) => createdWithinReviewRange(item, range, customFrom, customTo)),
+    [modeDeck, range, customFrom, customTo],
   );
   const visibleDeck = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase('vi');
     return rangeDeck.filter((item) => {
-      if (typeFilter !== 'all' && item.reviewType !== typeFilter) return false;
+      if (reviewStyle === 'flashcard' && typeFilter !== 'all' && item.reviewType !== typeFilter) return false;
       if (!needle) return true;
       const text = item.reviewType === 'word'
         ? `${item.term || ''} ${item.translation || ''}`
         : `${item.pattern || ''} ${item.meaning || ''}`;
       return text.toLocaleLowerCase('vi').includes(needle);
     });
-  }, [rangeDeck, search, typeFilter]);
+  }, [rangeDeck, reviewStyle, search, typeFilter]);
 
   const selectedVisibleCount = visibleDeck.filter((item) => selectedKeys.has(reviewCardKey(item))).length;
+  const selectedCount = modeDeck.filter((item) => selectedKeys.has(reviewCardKey(item))).length;
   const invalidCustomRange = range === 'custom' && customFrom && customTo && customFrom > customTo;
 
   function toggleCard(item) {
@@ -934,11 +1162,35 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
     });
   }
 
+  function selectRangeFrom(candidateDeck, nextRange = range, nextFrom = customFrom, nextTo = customTo) {
+    const eligible = candidateDeck.filter((item) => createdWithinReviewRange(item, nextRange, nextFrom, nextTo));
+    setSelectedKeys(new Set(eligible.map(reviewCardKey)));
+  }
+
+  function chooseReviewStyle(nextStyle) {
+    if (nextStyle === 'typed' && !activeQuizDirection) return;
+    selectionTouched.current = true;
+    setReviewStyle(nextStyle);
+    setTypeFilter(nextStyle === 'typed' ? 'word' : 'all');
+    const candidateDeck = nextStyle === 'typed'
+      ? allDeck.filter((item) => item.reviewType === 'word' && wordMatchesQuizDirection(item, activeQuizDirection))
+      : allDeck;
+    selectRangeFrom(candidateDeck);
+  }
+
+  function chooseQuizDirection(nextKey) {
+    const nextDirection = quizDirections.find((direction) => direction.key === nextKey);
+    if (!nextDirection) return;
+    selectionTouched.current = true;
+    setQuizDirectionKey(nextKey);
+    const candidateDeck = allDeck.filter((item) => item.reviewType === 'word' && wordMatchesQuizDirection(item, nextDirection));
+    selectRangeFrom(candidateDeck);
+  }
+
   function chooseRange(nextRange, nextFrom = customFrom, nextTo = customTo) {
     selectionTouched.current = true;
     setRange(nextRange);
-    const eligible = allDeck.filter((item) => createdWithinReviewRange(item, nextRange, nextFrom, nextTo));
-    setSelectedKeys(new Set(eligible.map(reviewCardKey)));
+    selectRangeFrom(modeDeck, nextRange, nextFrom, nextTo);
   }
 
   function changeCustomFrom(value) {
@@ -976,11 +1228,18 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
 
   function startReview() {
     if (invalidCustomRange) return;
-    const selectedDeck = allDeck.filter((item) => selectedKeys.has(reviewCardKey(item)));
+    const selectedDeck = modeDeck
+      .filter((item) => selectedKeys.has(reviewCardKey(item)))
+      .map((item) => ({ ...item }));
     if (!selectedDeck.length) return;
     setDeck(selectedDeck);
+    setSessionStyle(reviewStyle);
+    setSessionDirection(reviewStyle === 'typed' ? { ...activeQuizDirection } : null);
     setIndex(0);
     setFlipped(false);
+    setTypedAnswer('');
+    setTypedResult(null);
+    typedSubmission.current = '';
     setFinished(false);
     setReviewedCount(0);
     setMessage('');
@@ -989,7 +1248,7 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
   }
 
   function chooseAnotherDeck() {
-    const currentDue = allDeck.filter(dueForReview);
+    const currentDue = modeDeck.filter(dueForReview);
     selectionTouched.current = true;
     setSelectedKeys(new Set(currentDue.map(reviewCardKey)));
     setRange('due');
@@ -998,6 +1257,9 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
     setDeck([]);
     setIndex(0);
     setFlipped(false);
+    setTypedAnswer('');
+    setTypedResult(null);
+    typedSubmission.current = '';
     setFinished(false);
     setReviewedCount(0);
     setMessage('');
@@ -1022,6 +1284,46 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
     finally { setSubmitting(false); }
   }
 
+  async function submitTypedAnswer(event) {
+    event.preventDefault();
+    if (!card || !typedContent || typedResult || submitting || !typedAnswer.trim()) return;
+    const submissionKey = reviewCardKey(card);
+    if (typedSubmission.current === submissionKey) return;
+    typedSubmission.current = submissionKey;
+    const submittedAnswer = typedAnswer.trim();
+    const normalized = normalizedText(submittedAnswer, sessionDirection?.answerLanguage || 'vi');
+    const correct = typedContent.acceptedAnswers.includes(normalized);
+    const rating = correct ? 'good' : 'again';
+    setSubmitting(true);
+    setMessage('Đang chấm và lưu kết quả…');
+    try {
+      const result = await api.submitReview({ id: card.id, type: 'word', rating });
+      await onReviewed(card, rating, result?.item);
+      setTypedResult({ correct, submittedAnswer });
+      setReviewedCount((count) => count + 1);
+      setMessage(correct ? 'Chính xác! Kết quả đã được lưu.' : 'Chưa đúng. Xem đáp án rồi chuyển sang câu tiếp theo.');
+    } catch (error) {
+      typedSubmission.current = '';
+      setMessage(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function advanceTypedQuiz() {
+    if (!typedResult || submitting) return;
+    if (index + 1 >= deck.length) {
+      setFinished(true);
+      setMessage(`Đã hoàn thành ${reviewedCount} thẻ.`);
+    } else {
+      setIndex((value) => value + 1);
+      setTypedAnswer('');
+      setTypedResult(null);
+      typedSubmission.current = '';
+      setMessage('');
+    }
+  }
+
   if (!allDeck.length) {
     return (
       <div className="page page--review">
@@ -1040,6 +1342,13 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
       { id: 'all', label: 'Từ trước đến giờ' },
       { id: 'custom', label: 'Tự chọn ngày' },
     ];
+    const promptLanguages = [...new Set(quizDirections.map((direction) => direction.promptLanguage))];
+    const answerDirections = quizDirections.filter((direction) => direction.promptLanguage === activeQuizDirection?.promptLanguage);
+    const duplicateAnswerLanguages = new Set(answerDirections
+      .filter((direction, index, list) => list.some((candidate, candidateIndex) => (
+        candidateIndex !== index && candidate.answerLanguage === direction.answerLanguage
+      )))
+      .map((direction) => direction.answerLanguage));
 
     return (
       <div className="page page--review">
@@ -1052,7 +1361,48 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
         <section className="review-builder" aria-labelledby="review-range-title">
           <div className="review-builder__section">
             <div className="review-builder__heading">
-              <div><span className="review-step">1</span><div><h2 id="review-range-title">Chọn thời điểm đã thêm</h2><p>Mặc định là các thẻ đang đến hạn ôn.</p></div></div>
+              <div><span className="review-step">1</span><div><h2>Chọn cách ôn</h2><p>Giữ flashcard quen thuộc hoặc tự gõ đáp án để kiểm tra trí nhớ.</p></div></div>
+            </div>
+            <div className="review-style-options" role="radiogroup" aria-label="Cách ôn tập">
+              <button type="button" role="radio" aria-checked={reviewStyle === 'flashcard'} className={reviewStyle === 'flashcard' ? 'is-active' : ''} onClick={() => chooseReviewStyle('flashcard')}>
+                <span><Layers3 size={21} /></span><div><strong>Flashcard</strong><small>Lật thẻ và tự đánh giá mức độ nhớ.</small></div>
+              </button>
+              <button type="button" role="radio" aria-checked={reviewStyle === 'typed'} className={reviewStyle === 'typed' ? 'is-active' : ''} disabled={!quizDirections.length} aria-describedby={!quizDirections.length ? 'typed-mode-help' : undefined} onClick={() => chooseReviewStyle('typed')}>
+                <span><Brain size={21} /></span><div><strong>Tự gõ đáp án</strong><small>Chỉ dùng từ vựng có đủ từ và nghĩa.</small></div>
+              </button>
+            </div>
+            {!quizDirections.length && <p className="review-mode-help" id="typed-mode-help"><CircleAlert size={15} /> Cần ít nhất một từ có nghĩa hợp lệ để dùng chế độ tự gõ.</p>}
+
+            {reviewStyle === 'typed' && activeQuizDirection && (
+              <div className="quiz-direction" aria-label="Hướng câu hỏi và trả lời">
+                <label>
+                  <span>Ngôn ngữ câu hỏi</span>
+                  <span className="select-wrap"><select value={activeQuizDirection.promptLanguage} onChange={(event) => {
+                    const direction = quizDirections.find((item) => item.promptLanguage === event.target.value);
+                    if (direction) chooseQuizDirection(direction.key);
+                  }}>{promptLanguages.map((code) => <option value={code} key={`prompt-${code}`}>{languageByCode(code).flag} {languageByCode(code).name}</option>)}</select><ChevronDown size={17} /></span>
+                </label>
+                <span className="quiz-direction__arrow" aria-hidden="true"><ArrowRight size={18} /></span>
+                <label>
+                  <span>Ngôn ngữ trả lời</span>
+                  <span className="select-wrap"><select value={activeQuizDirection.key} onChange={(event) => {
+                    const direction = answerDirections.find((item) => item.key === event.target.value);
+                    if (direction) chooseQuizDirection(direction.key);
+                  }}>{answerDirections.map((direction) => <option value={direction.key} key={direction.key}>
+                    {languageByCode(direction.answerLanguage).flag} {languageByCode(direction.answerLanguage).name}
+                    {duplicateAnswerLanguages.has(direction.answerLanguage)
+                      ? ` · bộ ${languageByCode(direction.learningLanguage).name} → ${languageByCode(direction.nativeLanguage).name} (${direction.count})`
+                      : ''}
+                  </option>)}</select><ChevronDown size={17} /></span>
+                </label>
+                <small>{activeQuizDirection.count} từ hợp lệ cho hướng này · Bộ thẻ sẽ được cố định khi bắt đầu.</small>
+              </div>
+            )}
+          </div>
+
+          <div className="review-builder__section">
+            <div className="review-builder__heading">
+              <div><span className="review-step">2</span><div><h2 id="review-range-title">Chọn thời điểm đã thêm</h2><p>Mặc định là các thẻ đang đến hạn ôn.</p></div></div>
             </div>
             <div className="review-range-tabs" role="group" aria-label="Lọc theo thời điểm thêm thẻ">
               {ranges.map((option) => (
@@ -1077,15 +1427,15 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
 
           <div className="review-builder__section review-builder__section--cards">
             <div className="review-builder__heading review-builder__heading--selection">
-              <div><span className="review-step">2</span><div><h2>Chọn từng thẻ</h2><p><strong>{selectedKeys.size}</strong> thẻ đã chọn · {visibleDeck.length} thẻ đang hiện</p></div></div>
-              {selectedKeys.size > 0 && <button type="button" className="review-clear-all" onClick={clearAll}>Bỏ chọn tất cả</button>}
+              <div><span className="review-step">3</span><div><h2>Chọn từng thẻ</h2><p><strong>{selectedCount}</strong> thẻ đã chọn · {visibleDeck.length} thẻ đang hiện</p></div></div>
+              {selectedCount > 0 && <button type="button" className="review-clear-all" onClick={clearAll}>Bỏ chọn tất cả</button>}
             </div>
 
             <div className="review-list-filters">
               <label className="review-search"><Search size={17} aria-hidden="true" /><span className="sr-only">Tìm trong danh sách thẻ</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm từ hoặc nghĩa…" /></label>
-              <div className="review-type-tabs" role="group" aria-label="Loại thẻ">
+              {reviewStyle === 'flashcard' ? <div className="review-type-tabs" role="group" aria-label="Loại thẻ">
                 {[['all', 'Tất cả'], ['word', 'Từ vựng'], ['structure', 'Cấu trúc']].map(([id, label]) => <button type="button" key={id} className={typeFilter === id ? 'is-active' : ''} aria-pressed={typeFilter === id} onClick={() => setTypeFilter(id)}>{label}</button>)}
-              </div>
+              </div> : <div className="review-word-only"><Brain size={16} /> Chế độ tự gõ chỉ dùng từ vựng</div>}
             </div>
 
             <div className="review-bulk-actions">
@@ -1117,8 +1467,8 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
           </div>
 
           <div className="review-start-bar">
-            <div><strong>{selectedKeys.size} thẻ</strong><span>sẽ được ôn trong phiên này</span></div>
-            <Button onClick={startReview} disabled={!selectedKeys.size || invalidCustomRange} icon={ArrowRight}>Bắt đầu ôn</Button>
+            <div><strong>{selectedCount} thẻ</strong><span>{reviewStyle === 'typed' ? 'sẽ được hỏi theo hướng đã chọn' : 'sẽ được ôn trong phiên này'}</span></div>
+            <Button onClick={startReview} disabled={!selectedCount || invalidCustomRange} icon={ArrowRight}>Bắt đầu ôn</Button>
           </div>
         </section>
       </div>
@@ -1140,13 +1490,62 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
 
   return (
     <div className="page page--review">
-      <PageTop title="Ôn tập flashcard" description="Nhớ nghĩa trước khi lật thẻ, rồi đánh giá thật đúng cảm nhận." />
+      <PageTop
+        title={sessionStyle === 'typed' ? 'Tự gõ đáp án' : 'Ôn tập flashcard'}
+        description={sessionStyle === 'typed'
+          ? `${languageByCode(sessionDirection?.promptLanguage).name} → ${languageByCode(sessionDirection?.answerLanguage).name}. Mỗi câu chỉ được ghi nhận một lần.`
+          : 'Nhớ nghĩa trước khi lật thẻ, rồi đánh giá thật đúng cảm nhận.'}
+      />
       <div className="review-toolbar">
         <span>Thẻ {index + 1} / {deck.length}</span>
-        <div className="progress-track"><i style={{ width: `${((index + (flipped ? 0.5 : 0)) / deck.length) * 100}%` }} /></div>
+        <div className="progress-track"><i style={{ width: `${((index + (sessionStyle === 'typed' ? (typedResult ? 0.5 : 0) : (flipped ? 0.5 : 0))) / deck.length) * 100}%` }} /></div>
         <span>{Math.max(0, deck.length - index - 1)} còn lại</span>
       </div>
 
+      {sessionStyle === 'typed' ? (
+        <form className="typed-quiz" onSubmit={submitTypedAnswer}>
+          <section className={`typed-quiz__card ${typedResult ? (typedResult.correct ? 'is-correct' : 'is-incorrect') : ''}`} aria-labelledby="typed-quiz-prompt">
+            <span className="typed-quiz__badge"><Languages size={15} /> Câu hỏi · {languageByCode(sessionDirection?.promptLanguage).name}</span>
+            <div className="typed-quiz__prompt">
+              <small>{sessionDirection?.answerField === 'translation' ? 'Hãy gõ nghĩa tương ứng' : 'Hãy gõ từ tương ứng'}</small>
+              <h2 id="typed-quiz-prompt">{typedContent?.prompt}</h2>
+            </div>
+            <label className="typed-quiz__answer" htmlFor={`typed-answer-${card.id}`}>
+              <span>Trả lời bằng {languageByCode(sessionDirection?.answerLanguage).name}</span>
+              <input
+                key={card.id}
+                id={`typed-answer-${card.id}`}
+                value={typedAnswer}
+                onChange={(event) => setTypedAnswer(event.target.value)}
+                placeholder={`Nhập đáp án bằng ${languageByCode(sessionDirection?.answerLanguage).name}…`}
+                autoComplete="off"
+                autoCapitalize="none"
+                disabled={Boolean(typedResult) || submitting}
+                aria-invalid={typedResult ? !typedResult.correct : undefined}
+                autoFocus
+              />
+            </label>
+
+            {typedResult && (
+              <div className={`typed-feedback ${typedResult.correct ? 'is-correct' : 'is-incorrect'}`} role="status" aria-live="polite">
+                <span>{typedResult.correct ? <Check size={22} /> : <X size={22} />}</span>
+                <div>
+                  <strong>{typedResult.correct ? 'Chính xác!' : 'Chưa đúng lần này'}</strong>
+                  {!typedResult.correct && <p>Bạn đã trả lời: <q>{typedResult.submittedAnswer}</q></p>}
+                  <p>Đáp án: <b>{typedContent?.answer}</b></p>
+                  {card.example && <small>{card.example}</small>}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {!typedResult ? (
+            <Button type="submit" className="typed-quiz__action" loading={submitting} disabled={!typedAnswer.trim()} icon={Check}>Kiểm tra đáp án</Button>
+          ) : (
+            <Button type="button" className="typed-quiz__action" onClick={advanceTypedQuiz} icon={ArrowRight}>{index + 1 >= deck.length ? 'Hoàn thành' : 'Câu tiếp theo'}</Button>
+          )}
+        </form>
+      ) : (<>
       <button
         type="button"
         className={`flashcard ${flipped ? 'is-flipped' : ''}`}
@@ -1185,6 +1584,7 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
           </div>
         </div>
       )}
+      </>)}
       <div className="review-announcer" aria-live="polite">{message}</div>
     </div>
   );

@@ -1,6 +1,8 @@
 const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 const LOCAL_SESSION_KEY = 'lingobloom.localSession';
 const LOCAL_DATA_KEY = 'lingobloom.localData.v1';
+const DICTIONARY_ENGLISH_ONLY_MESSAGE = 'Gợi ý tự động hiện chỉ hỗ trợ ngôn ngữ đang học là Tiếng Anh. Bạn có thể đổi ngôn ngữ học hoặc nhập danh sách bằng file CSV/TXT.';
+const LOCAL_DICTIONARY_PAIR_MESSAGE = 'Từ điển demo ngoại tuyến hiện chỉ hỗ trợ cặp Tiếng Anh → Tiếng Việt. Hãy kết nối máy chủ hoặc chọn lại cặp ngôn ngữ này.';
 
 export const LANGUAGES = [
   { code: 'en', name: 'Tiếng Anh', native: 'English', flag: '🇬🇧' },
@@ -129,6 +131,17 @@ const defaultData = {
     { date: day(0), count: 4 },
   ],
 };
+
+const localDictionary = [
+  { term: 'resilient', translation: 'kiên cường, có khả năng phục hồi', pronunciation: '/rɪˈzɪl.i.ənt/', partOfSpeech: 'tính từ', example: 'She stayed resilient through every challenge.' },
+  { term: 'curious', translation: 'tò mò, ham tìm hiểu', pronunciation: '/ˈkjʊə.ri.əs/', partOfSpeech: 'tính từ', example: 'Stay curious and keep asking questions.' },
+  { term: 'embrace', translation: 'đón nhận; ôm', pronunciation: '/ɪmˈbreɪs/', partOfSpeech: 'động từ', example: 'She learned to embrace change.' },
+  { term: 'luminous', translation: 'tỏa sáng, rực rỡ', pronunciation: '/ˈluː.mɪ.nəs/', partOfSpeech: 'tính từ', example: 'The moon looked luminous above the lake.' },
+  { term: 'tranquil', translation: 'yên bình, thanh thản', pronunciation: '/ˈtræŋ.kwɪl/', partOfSpeech: 'tính từ', example: 'We found a tranquil place to read.' },
+  { term: 'flourish', translation: 'phát triển mạnh, nở rộ', pronunciation: '/ˈflʌr.ɪʃ/', partOfSpeech: 'động từ', example: 'Small habits help your vocabulary flourish.' },
+  { term: 'mindful', translation: 'chú tâm, có ý thức', pronunciation: '/ˈmaɪnd.fəl/', partOfSpeech: 'tính từ', example: 'Be mindful of how you use each new word.' },
+  { term: 'delight', translation: 'niềm vui; làm vui thích', pronunciation: '/dɪˈlaɪt/', partOfSpeech: 'danh từ, động từ', example: 'The little surprise filled her with delight.' },
+];
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -480,29 +493,104 @@ export const api = {
     return extract(payload, ['result']);
   },
 
-  async lookupDictionary(query, languages) {
+  async suggestDictionary(query, languages) {
     if (isLocalDemo()) {
-      const known = defaultData.words.find((word) => word.term.toLowerCase() === query.trim().toLowerCase());
-      if (known) return [normalizeWord(known)];
-      return [{
-        id: `lookup-${query}`,
-        term: query.trim(),
-        translation: '',
-        pronunciation: '',
-        partOfSpeech: '',
-        example: '',
-        source: 'Bản nháp demo',
-      }];
+      if (languages.learningLanguage !== 'en' || languages.nativeLanguage !== 'vi') {
+        throw new Error(LOCAL_DICTIONARY_PAIR_MESSAGE);
+      }
+      const needle = query.normalize('NFKC').trim().toLocaleLowerCase('en');
+      const saved = new Set(readLocalData().words.map((word) => word.term.normalize('NFKC').trim().toLocaleLowerCase('en')));
+      return localDictionary
+        .filter((entry) => !saved.has(entry.term.toLocaleLowerCase('en')) && entry.term.toLocaleLowerCase('en').includes(needle))
+        .slice(0, 8)
+        .map((entry, index) => ({
+          ...normalizeWord(entry),
+          id: `demo-dictionary-${entry.term}`,
+          source: 'Từ điển demo',
+          dictionaryEntryIndex: index,
+          dictionaryLookupTerm: query.trim(),
+          dictionarySourceLanguage: languages.learningLanguage,
+          dictionaryTargetLanguage: languages.nativeLanguage,
+        }));
+
     }
     const search = new URLSearchParams({
       q: query,
-      query,
+      source: languages.learningLanguage,
+      target: languages.nativeLanguage,
+      inputLanguage: languages.learningLanguage,
+      limit: '8',
+    });
+    const payload = await request(`/dictionary/suggestions?${search}`);
+    if (payload?.meta?.supported === false) {
+      throw new Error(DICTIONARY_ENGLISH_ONLY_MESSAGE);
+    }
+    const result = extract(payload, ['suggestions', 'results', 'entries', 'words']);
+    return (Array.isArray(result) ? result : result ? [result] : []).map((entry, index) => ({
+      ...normalizeWord(entry),
+      dictionaryEntryIndex: index,
+      dictionaryLookupTerm: query.trim(),
+      dictionarySourceLanguage: languages.learningLanguage,
+      dictionaryTargetLanguage: languages.nativeLanguage,
+    }));
+  },
+
+  async lookupDictionary(query, languages) {
+    if (isLocalDemo()) return this.suggestDictionary(query, languages);
+    const search = new URLSearchParams({
+      q: query,
       source: languages.learningLanguage,
       target: languages.nativeLanguage,
     });
     const payload = await request(`/dictionary/search?${search}`);
     const result = extract(payload, ['results', 'entries', 'words']);
-    return (Array.isArray(result) ? result : result ? [result] : []).map(normalizeWord);
+    return (Array.isArray(result) ? result : result ? [result] : []).map((entry, index) => ({
+      ...normalizeWord(entry),
+      dictionaryEntryIndex: index,
+      dictionaryLookupTerm: query.trim(),
+      dictionarySourceLanguage: languages.learningLanguage,
+      dictionaryTargetLanguage: languages.nativeLanguage,
+    }));
+  },
+
+  async importDictionary(candidate, languages) {
+    const learningLanguage = languages.learningLanguage;
+    const nativeLanguage = languages.nativeLanguage;
+    if (isLocalDemo()) {
+      const data = readLocalData();
+      const termKey = candidate.term.normalize('NFKC').trim().toLocaleLowerCase(learningLanguage);
+      const duplicate = data.words.some((word) => (
+        (word.learningLanguage || word.language || 'en') === learningLanguage
+        && word.term.normalize('NFKC').trim().toLocaleLowerCase(learningLanguage) === termKey
+      ));
+      if (duplicate) throw new Error('Từ này đã có trong thư viện.');
+      const created = normalizeWord({
+        term: candidate.term,
+        translation: candidate.translation,
+        pronunciation: candidate.pronunciation || '',
+        partOfSpeech: candidate.partOfSpeech || '',
+        example: candidate.example || '',
+        notes: '',
+        source: 'dictionary',
+        learningLanguage,
+        nativeLanguage,
+        id: makeId('word'),
+        bookmarked: false,
+        mastery: 0,
+        nextReviewAt: day(0),
+        createdAt: new Date().toISOString(),
+      });
+      data.words.unshift(created);
+      writeLocalData(data);
+      return created;
+    }
+
+    if (!candidate.selectionToken) throw new Error('Gợi ý này đã hết hạn. Hãy tìm và chọn lại từ.');
+    const payload = await request('/dictionary/selection', {
+      method: 'POST',
+      body: { selectionToken: candidate.selectionToken },
+    });
+    return normalizeWord(extract(payload, ['word']));
   },
 
   async getStats() {

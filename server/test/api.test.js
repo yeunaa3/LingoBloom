@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { MongoMemoryReplSet } from "mongodb-memory-server-core";
 import { createApp } from "../src/app.js";
-import { createDatabase } from "../src/db.js";
+import { createDatabase, upsertGoogleUser } from "../src/db.js";
 
 let server;
 let baseUrl;
@@ -20,13 +20,24 @@ const testConfig = {
   google: { clientId: "", clientSecret: "", callbackUrl: "http://localhost/callback" },
   mongoUri: "",
   mongoDbName: "lingobloom_test",
-  dictionary: { provider: "free_dictionary", baseUrl: "https://example.invalid" },
+  dictionary: {
+    provider: "free_dictionary",
+    baseUrl: "https://example.invalid",
+    suggestionBaseUrl: "https://example.invalid/suggest",
+    translationBaseUrl: "https://example.invalid/translate",
+    selectionTtlSeconds: 300,
+  },
   serveClient: false,
   nodeEnv: "test",
 };
 
 const dictionaryService = {
   providerName: "test_dictionary",
+  suggestionProviderName: "test_suggestions",
+  translationProviderName: "test_translation",
+  supportsSelectionLanguage(language) {
+    return language === "en";
+  },
   async search(query, sourceLanguage, targetLanguage) {
     return [{
       term: query,
@@ -39,6 +50,45 @@ const dictionaryService = {
       targetLanguage,
       definitions: [],
     }];
+  },
+  async suggest(query, sourceLanguage, targetLanguage, { inputLanguage }) {
+    if (sourceLanguage !== "en") {
+      return {
+        suggestions: [],
+        supported: false,
+        mode: "unsupported",
+        reason: "LEARNING_LANGUAGE_NOT_SUPPORTED",
+      };
+    }
+    return {
+      suggestions: [{
+        term: inputLanguage !== sourceLanguage || query.toLowerCase().startsWith("pet")
+          ? "petal"
+          : query,
+        score: 987,
+        match: inputLanguage === sourceLanguage ? "prefix" : "translated_prefix",
+        inputLanguage,
+      }],
+      supported: true,
+      mode: inputLanguage === sourceLanguage ? "prefix" : "translated_prefix",
+      inputLanguage,
+      lookupQuery: inputLanguage === sourceLanguage ? query : "petal",
+    };
+  },
+  async resolveSelection(term, sourceLanguage, targetLanguage) {
+    if (term.toLowerCase() !== "petal") return null;
+    return {
+      term: "petal",
+      word: "petal",
+      translation: targetLanguage === "vi" ? "cánh hoa" : "flower petal",
+      definition: "a coloured segment of a flower",
+      pronunciation: "/ˈpet.əl/",
+      partOfSpeech: "noun",
+      example: "A pink petal fell onto the table.",
+      sourceLanguage,
+      targetLanguage,
+      translationProvider: "test_translation",
+    };
   },
 };
 
@@ -107,6 +157,49 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     });
     assert.equal(preferences.response.status, 200);
     assert.equal(preferences.payload.user.onboardingCompleted, true);
+  });
+
+  await t.test("validates Google profiles and refuses ambiguous account linking", async () => {
+    await assert.rejects(
+      () => upsertGoogleUser(db, { id: "missing-email", displayName: "No email" }),
+      (error) => error.code === "GOOGLE_EMAIL_REQUIRED" && error.status === 401,
+    );
+
+    const linked = await upsertGoogleUser(db, {
+      id: "google-profile-a",
+      displayName: "Google A",
+      emails: [{ value: "google-a@example.com", verified: true }],
+      photos: [{ value: "http://insecure.example/avatar.png" }],
+    });
+    assert.equal(String(linked._id), "google-google-profile-a");
+    assert.equal(linked.email, "google-a@example.com");
+    assert.equal(linked.avatarUrl, null);
+
+    await assert.rejects(
+      () => upsertGoogleUser(db, {
+        id: "different-google-id",
+        displayName: "Same email, different Google ID",
+        emails: [{ value: "google-a@example.com", verified: true }],
+      }),
+      (error) => error.code === "GOOGLE_ACCOUNT_CONFLICT" && error.status === 409,
+    );
+
+    await db.models.User.create({
+      _id: "google-conflict-user",
+      googleId: "google-profile-b",
+      email: "google-b@example.com",
+      displayName: "Google B",
+      learningLanguage: "en",
+      nativeLanguage: "vi",
+    });
+    await assert.rejects(
+      () => upsertGoogleUser(db, {
+        id: "google-profile-a",
+        displayName: "Conflicting Google",
+        emails: [{ value: "google-b@example.com", verified: true }],
+      }),
+      (error) => error.code === "GOOGLE_ACCOUNT_CONFLICT" && error.status === 409,
+    );
   });
 
   let wordId;
@@ -199,6 +292,8 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     const lookup = await request("/api/dictionary/search?q=petal&source=en&target=vi");
     assert.equal(lookup.response.status, 200);
     assert.equal(lookup.payload.entries[0].term, "petal");
+    assert.equal(lookup.payload.entries[0].selectable, true);
+    assert.equal(typeof lookup.payload.entries[0].selectionToken, "string");
     assert.equal(lookup.payload.meta.provider, "test_dictionary");
 
     const invalidEntry = await request("/api/dictionary/import", {
@@ -207,6 +302,76 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     });
     assert.equal(invalidEntry.response.status, 400);
     assert.equal(invalidEntry.payload.error.code, "INVALID_DICTIONARY_ENTRY");
+  });
+
+  await t.test("suggests terms and only persists a signed selected candidate", async () => {
+    const tooShort = await request("/api/dictionary/suggestions?q=p&source=en&target=vi");
+    assert.equal(tooShort.response.status, 200);
+    assert.deepEqual(tooShort.payload.suggestions, []);
+    assert.equal(tooShort.payload.meta.mode, "waiting");
+
+    const suggested = await request(
+      "/api/dictionary/suggestions?q=pet&source=en&target=vi&inputLanguage=en&limit=5",
+    );
+    assert.equal(suggested.response.status, 200);
+    assert.equal(suggested.payload.suggestions[0].term, "petal");
+    assert.equal(suggested.payload.suggestions[0].normalizedTerm, "petal");
+    assert.equal(suggested.payload.suggestions[0].selectable, true);
+    assert.equal(suggested.payload.meta.mode, "prefix");
+    const selectionToken = suggested.payload.suggestions[0].selectionToken;
+    assert.equal(typeof selectionToken, "string");
+    assert.ok(selectionToken.includes("."));
+
+    const translatedInput = await request(
+      `/api/dictionary/autocomplete?q=${encodeURIComponent("cánh hoa")}&source=en&target=vi&inputLanguage=vi`,
+    );
+    assert.equal(translatedInput.response.status, 200);
+    assert.equal(translatedInput.payload.meta.mode, "translated_prefix");
+    assert.equal(translatedInput.payload.suggestions[0].term, "petal");
+
+    const unsupported = await request(
+      "/api/dictionary/suggestions?q=sakura&source=ja&target=vi&inputLanguage=ja",
+    );
+    assert.equal(unsupported.response.status, 200);
+    assert.deepEqual(unsupported.payload.suggestions, []);
+    assert.equal(unsupported.payload.meta.supported, false);
+    assert.equal(unsupported.payload.meta.reason, "LEARNING_LANGUAGE_NOT_SUPPORTED");
+
+    const tamperedToken = `${selectionToken.slice(0, -1)}${selectionToken.endsWith("a") ? "b" : "a"}`;
+    const tampered = await request("/api/dictionary/selection", {
+      method: "POST",
+      body: { selectionToken: tamperedToken },
+    });
+    assert.equal(tampered.response.status, 400);
+    assert.equal(tampered.payload.error.code, "INVALID_DICTIONARY_SELECTION");
+
+    const override = await request("/api/dictionary/selection", {
+      method: "POST",
+      body: { selectionToken, term: "misspelled-petall" },
+    });
+    assert.equal(override.response.status, 400);
+    assert.equal(override.payload.error.code, "DICTIONARY_SELECTION_OVERRIDES_NOT_ALLOWED");
+
+    // `/import` accepts the strict token form so existing clients can migrate
+    // without changing the endpoint and cannot inject raw word fields.
+    const saved = await request("/api/dictionary/import", {
+      method: "POST",
+      body: { selectionToken, bookmarked: true },
+    });
+    assert.equal(saved.response.status, 201);
+    assert.equal(saved.payload.word.term, "petal");
+    assert.equal(saved.payload.word.translation, "cánh hoa");
+    assert.equal(saved.payload.word.language, "en");
+    assert.equal(saved.payload.word.nativeLanguage, "vi");
+    assert.equal(saved.payload.word.bookmarked, true);
+    assert.equal(saved.payload.selection.verified, true);
+
+    const replayed = await request("/api/dictionary/selection", {
+      method: "POST",
+      body: { selectionToken },
+    });
+    assert.equal(replayed.response.status, 409);
+    assert.equal(replayed.payload.error.code, "DUPLICATE_ITEM");
   });
 
   await t.test("records a review, reschedules the card and updates stats", async () => {

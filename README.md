@@ -9,9 +9,10 @@ Dự án phù hợp cho nhu cầu cá nhân hoặc nhóm rất nhỏ (1–2 ngư
 - Đăng nhập Google OAuth 2.0 hoặc chế độ demo rõ ràng khi chưa cấu hình Google.
 - Chọn ngôn ngữ đang học và ngôn ngữ mẹ đẻ.
 - Dashboard, tìm kiếm, bookmark và thống kê học tập cơ bản.
-- Thêm, sửa qua API và xóa từ vựng/cấu trúc câu.
-- Import CSV/TXT UTF-8 và tra từ qua lớp provider từ điển.
-- Flashcard lọc theo thời điểm thêm (hôm nay, 7 ngày, 30 ngày, toàn bộ hoặc khoảng tùy chọn), chọn riêng từng mục và lưu lịch ôn tiếp theo.
+- Thêm từ bằng một ô gợi ý: chọn đúng từ, hệ thống tự xác thực, dịch nghĩa và lưu metadata từ điển.
+- Thêm cấu trúc câu và import CSV/TXT UTF-8.
+- Ôn bằng flashcard tự đánh giá hoặc nhập đáp án theo chiều ngôn ngữ đã chọn.
+- Lọc bộ ôn theo thời điểm thêm (hôm nay, 7 ngày, 30 ngày, toàn bộ hoặc khoảng tùy chọn) và chọn riêng từng mục.
 - Dữ liệu, tài khoản và phiên đăng nhập được lưu trong MongoDB nên không mất khi Render khởi động lại.
 
 ## Công nghệ
@@ -166,6 +167,9 @@ DEMO_AUTH_ENABLED=true
 APP_TIME_ZONE_OFFSET_MINUTES=420
 DICTIONARY_PROVIDER=free_dictionary
 DICTIONARY_API_BASE_URL=https://api.dictionaryapi.dev/api/v2/entries
+DICTIONARY_SUGGEST_API_BASE_URL=https://api.datamuse.com/sug
+DICTIONARY_TRANSLATION_API_BASE_URL=https://api.mymemory.translated.net/get
+DICTIONARY_SELECTION_TTL_SECONDS=300
 ```
 
 Không cần tự đặt `PORT`; Render truyền cổng cho ứng dụng. Express phục vụ `client/dist`, nên frontend và API dùng chung một URL và giữ `VITE_API_URL=/api`.
@@ -182,39 +186,71 @@ Kết quả hợp lệ có `status: "ok"` và database MongoDB. Sau đó mở UR
 
 ## Bật Google OAuth sau khi deploy
 
-Nên deploy với demo trước để biết chính xác URL Render, rồi mới cấu hình Google:
+Nên deploy với demo trước để biết chính xác URL Render. Giả sử URL đang chạy là:
 
-1. Trong [Google Cloud Console](https://console.cloud.google.com/), tạo/chọn project và cấu hình OAuth consent screen.
-2. Tạo OAuth Client ID loại **Web application**.
-3. Thêm **Authorized JavaScript origin**:
+```text
+https://lingobloom-tenban.onrender.com
+```
+
+### Cấu hình cho URL `onrender.com`
+
+1. Trong [Google Cloud Console](https://console.cloud.google.com/), tạo/chọn một project rồi mở **Google Auth Platform**.
+2. Ở **Branding**, nhập tên ứng dụng và email liên hệ. Ở **Audience**, với nhu cầu 1–2 người có thể giữ trạng thái **Testing / External** và thêm chính xác các tài khoản Gmail được phép vào **Test users**. Tài khoản không nằm trong danh sách này sẽ không đăng nhập được khi ứng dụng còn ở Testing.
+3. Ở **Clients**, chọn **Create client → Web application**.
+4. Thêm **Authorized JavaScript origins** (chỉ protocol + hostname, không có đường dẫn và không có dấu `/` cuối):
 
    ```text
-   https://<ten-service>.onrender.com
+   https://lingobloom-tenban.onrender.com
    ```
 
-4. Thêm **Authorized redirect URI** chính xác:
+5. Thêm **Authorized redirect URIs** chính xác:
 
    ```text
-   https://<ten-service>.onrender.com/api/auth/google/callback
+   https://lingobloom-tenban.onrender.com/api/auth/google/callback
    ```
 
-5. Trong Render → service → **Environment**, thêm:
+6. Tạo client, sao chép Client ID và Client Secret vào Render → service → **Environment**:
 
    ```dotenv
    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=your-client-secret
    ```
 
-6. Lưu thay đổi, chờ Render deploy/restart và kiểm tra đăng nhập Google.
-7. Khi Google đã hoạt động, đặt `DEMO_AUTH_ENABLED=false` nếu không muốn người có đường link truy cập tài khoản demo chung.
+7. Lưu thay đổi và chờ Render restart/deploy. Mở `https://lingobloom-tenban.onrender.com/api/config`; `googleOAuthConfigured` cần là `true`, sau đó thử nút **Tiếp tục với Google** bằng một tài khoản Test user.
+8. Khi Google đã hoạt động, đặt `DEMO_AUTH_ENABLED=false` nếu không muốn người có đường link truy cập tài khoản demo chung.
 
-Origin và callback phải khớp tuyệt đối, gồm `https`, hostname và đường dẫn. Không thêm dấu `/` cuối callback.
+Backend chỉ yêu cầu scope hồ sơ cơ bản và email (`profile`, `email`). Client Secret chỉ được lưu trong Render Environment hoặc `.env` local; không dán vào frontend, `render.yaml`, ảnh chụp màn hình hay GitHub. Google yêu cầu redirect URI khớp tuyệt đối, kể cả `https`, hostname, chữ hoa/thường và dấu `/`; sai một ký tự thường gây lỗi `redirect_uri_mismatch`. Xem [hướng dẫn OAuth cho web server của Google](https://developers.google.com/identity/protocols/oauth2/web-server).
 
-Với subdomain `onrender.com`, backend tự suy ra URL frontend và callback từ `RENDER_EXTERNAL_HOSTNAME`. Chỉ cần đặt `CLIENT_URL` và `GOOGLE_CALLBACK_URL` khi dùng custom domain hoặc muốn ghi đè URL tự động.
+Với subdomain `onrender.com`, backend tự suy ra frontend URL và callback từ `RENDER_EXTERNAL_HOSTNAME`, nên không cần đặt `CLIENT_URL` hoặc `GOOGLE_CALLBACK_URL` trên Render.
+
+### Nếu dùng custom domain
+
+Ví dụ domain thật là `https://vocab.example.com`:
+
+1. Trong Google Client, thêm origin và callback mới:
+
+   ```text
+   Authorized JavaScript origin: https://vocab.example.com
+   Authorized redirect URI:     https://vocab.example.com/api/auth/google/callback
+   ```
+
+2. Trong Render Environment, ghi đè URL tự động:
+
+   ```dotenv
+   CLIENT_URL=https://vocab.example.com
+   GOOGLE_CALLBACK_URL=https://vocab.example.com/api/auth/google/callback
+   SECURE_COOKIES=true
+   ```
+
+3. Lưu và deploy lại. Không dùng wildcard, không thêm dấu `/` cuối và không đặt đường dẫn vào JavaScript origin. Có thể giữ URL `onrender.com` trong danh sách Google để chuyển lại sau này, nhưng callback mà ứng dụng đang gửi phải trùng một URI đã đăng ký.
+
+Nếu muốn cho người ngoài danh sách Test users đăng nhập, cần chuyển Audience/Publishing status phù hợp và đáp ứng các yêu cầu hiện hành của Google về branding, trang chủ, quyền riêng tư hoặc xác minh. Với ứng dụng cá nhân 1–2 người, giữ Testing và chỉ thêm hai tài khoản cần dùng là đơn giản nhất. Xem [Google Auth Platform – Audience](https://support.google.com/cloud/answer/15549945).
 
 ## Chế độ demo và bảo mật
 
 Khi `DEMO_AUTH_ENABLED=true`, mọi người biết URL đều có thể vào cùng tài khoản demo và nhìn thấy/chỉnh sửa dữ liệu demo chung. Chỉ giữ chế độ này để thử nghiệm hoặc khi bạn chấp nhận cách dùng chung đó. Sau khi Google hoạt động, nên tắt demo.
+
+Mỗi tài khoản Google có thư viện riêng theo user ID; dữ liệu của tài khoản demo không tự chuyển sang tài khoản Google. Nút Google chỉ được bật khi cả `GOOGLE_CLIENT_ID` và `GOOGLE_CLIENT_SECRET` đều có giá trị. Đừng tắt demo trước khi đã thử đăng nhập Google thành công, nếu không ứng dụng có thể tạm thời không còn cách đăng nhập.
 
 Session được lưu trong collection `sessions` của cùng MongoDB và có TTL 30 ngày. Cookie đăng nhập là `HttpOnly`, `SameSite=Lax`; ở Render phải giữ `SECURE_COOKIES=true` để cookie chỉ gửi qua HTTPS. `SESSION_SECRET`, `MONGODB_URI` và `GOOGLE_CLIENT_SECRET` phải nằm trong Render Environment, không nằm trong mã nguồn.
 
@@ -252,6 +288,9 @@ Backend đọc `.env` ở thư mục gốc hoặc `server/.env`. Mẫu đầy đ
 | `GOOGLE_CALLBACK_URL` | local hoặc hostname Render tự nhận | Redirect URI đã đăng ký với Google; chỉ cần đặt tay khi local/custom domain. |
 | `DICTIONARY_PROVIDER` | `free_dictionary` | Provider tra từ. |
 | `DICTIONARY_API_BASE_URL` | DictionaryAPI.dev | Endpoint nền của provider mặc định. |
+| `DICTIONARY_SUGGEST_API_BASE_URL` | Datamuse | Endpoint gợi ý tiền tố tiếng Anh. |
+| `DICTIONARY_TRANSLATION_API_BASE_URL` | MyMemory | Endpoint dịch từ đã xác thực sang ngôn ngữ mẹ đẻ. |
+| `DICTIONARY_SELECTION_TTL_SECONDS` | `300` | Số giây một lựa chọn còn hiệu lực; backend giới hạn trong khoảng 60–900. |
 | `SERVE_CLIENT` | `true` | Express phục vụ bản build `client/dist`. |
 | `NODE_ENV` | `development` | Dùng `production` trên Render. |
 | `SECURE_COOKIES` | theo production | Chỉ gửi cookie qua HTTPS khi bật. |
@@ -270,6 +309,46 @@ gentle,dịu dàng,adjective,/ˈdʒen.təl/,Be gentle with yourself.,
 ```
 
 Cấu trúc câu dùng `pattern,meaning,example,notes`. TXT ổn định nhất khi ngăn các trường bằng Tab theo thứ tự `term`, `translation`, `example`, `notes`. Ngôn ngữ được lấy từ cặp ngôn ngữ đang chọn trong hồ sơ.
+
+## Thêm từ bằng một ô gợi ý
+
+Trong **Thêm mới → Từ vựng**, gõ ít nhất 2 ký tự của từ đang học. Gợi ý xuất hiện tự động; bạn phải chọn một mục trong danh sách rồi nhấn **Lưu từ đã chọn**. Chỉ gõ nội dung tự do mà không chọn candidate sẽ không lưu được.
+
+Luồng lưu diễn ra như sau:
+
+1. Datamuse tìm tối đa 10 gợi ý theo tiền tố (UI hiện tối đa 8).
+2. Mỗi gợi ý mang một `selectionToken` ngắn hạn, gắn với người dùng và cặp ngôn ngữ. Mặc định token hết hạn sau 5 phút; nếu để quá lâu, hãy gõ/chọn lại.
+3. Khi lưu, backend tra lại đúng từ đã chọn bằng Free Dictionary API. Từ không còn khớp chính xác hoặc thiếu định nghĩa sẽ bị từ chối.
+4. MyMemory dịch từ chuẩn sang ngôn ngữ mẹ đẻ trong hồ sơ. Từ, nghĩa, phiên âm, từ loại và ví dụ khả dụng được lưu tự động; luồng một ô không nhận nội dung nghĩa tự sửa từ trình duyệt.
+
+Tại thời điểm tháng 8/2026, cấu hình mặc định chưa cần API key. [Datamuse công bố](https://www.datamuse.com/api/) mức dùng không khóa tối đa 100.000 truy vấn/ngày đến hết 31/12/2026 và sẽ yêu cầu key từ 01/01/2027; ứng dụng hiện chưa có biến key riêng, nên trước mốc đó cần cập nhật tích hợp hoặc trỏ `DICTIONARY_SUGGEST_API_BASE_URL` tới một endpoint/proxy tương thích. Tính năng cần Internet và có thể tạm lỗi/đạt giới hạn; khi đó ứng dụng không lưu kết quả chưa được xác thực mà yêu cầu thử lại.
+
+Giới hạn ngôn ngữ quan trọng:
+
+- Autocomplete và bước xác thực hiện chỉ hỗ trợ **ngôn ngữ đang học là tiếng Anh (`en`)**.
+- MyMemory cố dịch từ tiếng Anh sang ngôn ngữ mẹ đẻ đã chọn, nhưng chất lượng và số ngôn ngữ khả dụng phụ thuộc dịch vụ miễn phí. Nếu cần nghĩa chính xác theo ngữ cảnh, hãy dùng tệp CSV/TXT đã kiểm tra thay cho luồng gợi ý tự động.
+- Với ngôn ngữ đang học khác tiếng Anh, API trả danh sách rỗng với trạng thái không hỗ trợ thay vì tạo gợi ý giả. Có thể thêm dữ liệu bằng CSV/TXT; API thêm thủ công cũ vẫn được giữ để tương thích.
+- Demo chạy qua backend dùng cùng các provider thật. Chỉ khi frontend rơi về demo `localStorage` do không kết nối được backend, gợi ý mẫu offline mới giới hạn ở cặp Anh → Việt và không đồng bộ lên MongoDB.
+
+`selectionToken` được ký bằng `SESSION_SECRET`; không có secret từ điển mới. Đổi `SESSION_SECRET` sẽ làm các gợi ý đang chờ hết hiệu lực, nhưng không ảnh hưởng những từ đã lưu.
+
+## Ôn tập: flashcard và tự gõ đáp án
+
+Trong **Ôn tập**, chọn cách ôn trước khi lọc ngày và chọn từng thẻ:
+
+- **Flashcard** dùng được cho cả từ vựng và cấu trúc câu. Lật thẻ rồi tự chọn `Chưa nhớ` (10 phút), `Khó` (ngày mai), `Nhớ` (3 ngày) hoặc `Dễ` (7 ngày).
+- **Tự gõ đáp án** chỉ dùng từ vựng có cả `term` và `translation` hợp lệ. Cấu trúc câu và mục thiếu nghĩa không xuất hiện trong bộ này.
+
+Ở chế độ tự gõ, chọn **Ngôn ngữ câu hỏi → Ngôn ngữ trả lời** dựa trên các cặp ngôn ngữ thật đang có trong thư viện:
+
+- Ngôn ngữ đang học → ngôn ngữ mẹ đẻ: màn hình đưa từ (`term`), bạn gõ nghĩa (`translation`).
+- Ngôn ngữ mẹ đẻ → ngôn ngữ đang học: màn hình đưa nghĩa, bạn gõ lại từ.
+
+Đáp án được chuẩn hóa Unicode NFKC, bỏ khoảng trắng đầu/cuối, gom nhiều khoảng trắng thành một và không phân biệt chữ hoa/thường. Dấu tiếng Việt và dấu câu vẫn có ý nghĩa. Khi trả lời bằng nghĩa, các nghĩa đã lưu ngăn bằng dấu phẩy, chấm phẩy hoặc `|` được chấp nhận như các phương án riêng; khi trả lời bằng từ đang học, đáp án phải khớp từ đã lưu sau bước chuẩn hóa trên.
+
+Mỗi câu chỉ được chấm và ghi lịch một lần. Đúng được lưu tương đương mức **Nhớ / `good`** (ôn lại sau 3 ngày); sai tương đương **Chưa nhớ / `again`** (ôn lại sau 10 phút). Sau khi kiểm tra, ô nhập bị khóa và hiển thị đáp án trước khi chuyển câu. Bộ thẻ và chiều ngôn ngữ được cố định từ lúc bắt đầu phiên, còn bộ lọc theo ngày/tìm kiếm/chọn từng thẻ vẫn hoạt động như flashcard.
+
+Chế độ này không cần biến môi trường hay dịch vụ AI mới; việc chấm diễn ra trong frontend và lịch ôn được lưu qua API review hiện có.
 
 ## Build, kiểm tra và chạy production local
 
@@ -301,6 +380,8 @@ Express phục vụ cả API và React tại [http://localhost:3001](http://loca
 - Render báo deploy thành công nhưng trang lỗi: xem **Logs**, kiểm tra `MONGODB_URI`, `MONGODB_DB_NAME` và `/api/health`.
 - Google báo `redirect_uri_mismatch`: callback trong Google Cloud chưa giống URL `/api/auth/google/callback` mà ứng dụng đang dùng; chỉ đặt `GOOGLE_CALLBACK_URL` để ghi đè khi cần.
 - Đăng nhập xong quay lại màn hình login: kiểm tra `SECURE_COOKIES=true`; nếu dùng custom domain, kiểm tra thêm `CLIENT_URL` và `GOOGLE_CALLBACK_URL`.
+- Không thấy gợi ý từ: cần chọn tiếng Anh (`en`) làm ngôn ngữ đang học, nhập ít nhất 2 ký tự và kiểm tra kết nối tới Datamuse/Free Dictionary/MyMemory. Nếu lựa chọn đã quá 5 phút, hãy gõ và chọn lại.
+- Không chọn được chế độ tự gõ: thư viện cần có ít nhất một từ với cả từ và nghĩa hợp lệ; cấu trúc câu không dùng trong chế độ này.
 - Lần mở đầu mất lâu: Render Free đang khởi động lại sau thời gian ngủ.
 - PowerShell chặn `npm.ps1`: dùng `npm.cmd install` và `npm.cmd run dev`.
 

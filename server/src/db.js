@@ -271,12 +271,56 @@ export async function getUserById(db, id) {
 }
 
 export async function upsertGoogleUser(db, profile) {
-  const email = String(profile.emails?.[0]?.value || `${profile.id}@google.local`).toLowerCase();
-  const avatarUrl = profile.photos?.[0]?.value || null;
-  const displayName = profile.displayName || "Google user";
-  let user = await db.models.User.findOne({ $or: [{ googleId: profile.id }, { email }] });
+  const accountConflict = () => {
+    const error = new Error("Email Google đang thuộc về một tài khoản khác.");
+    error.status = 409;
+    error.code = "GOOGLE_ACCOUNT_CONFLICT";
+    return error;
+  };
+  const googleId = String(profile?.id || "").trim();
+  const googleEmail = profile?.emails?.find((item) => item?.value);
+  const email = String(googleEmail?.value || "").trim().toLowerCase();
+  if (!googleId || googleId.length > 200) {
+    const error = new Error("Google không trả về mã tài khoản hợp lệ.");
+    error.status = 401;
+    error.code = "GOOGLE_PROFILE_INVALID";
+    throw error;
+  }
+  if (
+    !email
+    || email.length > 320
+    || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    || googleEmail?.verified === false
+  ) {
+    const error = new Error("Google không trả về email đã xác minh cho tài khoản này.");
+    error.status = 401;
+    error.code = "GOOGLE_EMAIL_REQUIRED";
+    throw error;
+  }
+  let avatarUrl = profile?.photos?.[0]?.value || null;
+  try {
+    if (avatarUrl && new URL(avatarUrl).protocol !== "https:") avatarUrl = null;
+  } catch {
+    avatarUrl = null;
+  }
+  const displayName = String(profile?.displayName || email.split("@", 1)[0] || "Google user")
+    .trim()
+    .slice(0, 80);
+  const matches = await db.models.User.find({
+    $or: [{ googleId }, { email }],
+  }).limit(2);
+  const byGoogleId = matches.find((row) => row.googleId === googleId);
+  const byEmail = matches.find((row) => row.email === email);
+  if (
+    (byGoogleId && byEmail && String(byGoogleId._id) !== String(byEmail._id))
+    || (byEmail?.googleId && byEmail.googleId !== googleId)
+  ) {
+    throw accountConflict();
+  }
+  let user = byGoogleId || byEmail;
   if (user) {
-    user.googleId = profile.id;
+    user.googleId = googleId;
+    user.email = email;
     user.displayName = displayName || user.displayName;
     user.avatarUrl = avatarUrl;
     await user.save();
@@ -284,8 +328,8 @@ export async function upsertGoogleUser(db, profile) {
   }
   try {
     user = await db.models.User.create({
-      _id: `google-${profile.id}`,
-      googleId: profile.id,
+      _id: `google-${googleId}`,
+      googleId,
       email,
       displayName,
       avatarUrl,
@@ -297,7 +341,10 @@ export async function upsertGoogleUser(db, profile) {
     return user.toObject();
   } catch (error) {
     if (error?.code !== 11000) throw error;
-    return db.models.User.findOne({ $or: [{ googleId: profile.id }, { email }] }).lean();
+    const racedUser = await db.models.User.findOne({ $or: [{ googleId }, { email }] }).lean();
+    if (racedUser?.googleId && racedUser.googleId !== googleId) throw accountConflict();
+    if (racedUser) return racedUser;
+    throw error;
   }
 }
 
