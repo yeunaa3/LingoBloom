@@ -1,0 +1,24 @@
+{
+  "name": "lingobloom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ứng dụng học từ vựng mobile-first với React, Express và MongoDB Atlas",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail --names API,WEB --prefix-colors magenta,cyan \"node server/src/index.js\" \"vite --config client/vite.config.js --host 0.0.0.0\"",
+    "build": "vite build --config client/vite.config.js",
+    "start": "node server/src/index.js",
+    "test": "node --test server/test/*.test.js",
+    "check": "node --test server/test/*.test.js && vite build --config client/vite.config.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4",
+    "vite": "^8.2.1"
+  }
+}

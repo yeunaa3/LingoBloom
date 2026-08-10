@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: lingobloom
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SERVE_CLIENT
+        value: "true"
+      - key: SECURE_COOKIES
+        value: "true"
+      - key: VITE_API_URL
+        value: /api
+      - key: MONGODB_DB_NAME
+        value: lingobloom
+      - key: SESSION_COLLECTION
+        value: sessions
+      - key: MONGODB_URI
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DEMO_AUTH_ENABLED
+        value: "true"
+      - key: DICTIONARY_PROVIDER
+        value: free_dictionary
+      - key: DICTIONARY_API_BASE_URL
+        value: https://api.dictionaryapi.dev/api/v2/entries
+      - key: APP_TIME_ZONE_OFFSET_MINUTES
+        value: "420"

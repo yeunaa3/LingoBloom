@@ -1,0 +1,29 @@
+{
+  "name": "lingobloom-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node src/scripts/seed.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "connect-mongo": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-session": "^1.18.2",
+    "mongoose": "^9.9.1",
+    "multer": "^2.0.2",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server-core": "^11.2.0"
+  }
+}
