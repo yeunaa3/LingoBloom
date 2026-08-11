@@ -750,7 +750,10 @@ function WordForm({ user, onCreated, notify }) {
                 onClick={() => chooseSuggestion(item)}
               >
                 <span><strong>{item.term}</strong>{item.pronunciation && <small>{item.pronunciation}</small>}</span>
-                <span>{item.translation || 'Nghĩa và phiên âm sẽ được tự động bổ sung khi lưu.'}</span>
+                <span className="typeahead-meaning">
+                  <small>Nghĩa {languageByCode(nativeLanguage).name}</small>
+                  <b>{item.translation || 'Chưa tải được nghĩa xem trước'}</b>
+                </span>
                 {item.partOfSpeech && <em>{item.partOfSpeech}</em>}
               </button>
             ))}

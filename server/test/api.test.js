@@ -68,6 +68,9 @@ const dictionaryService = {
           : (inputLanguage !== sourceLanguage || query.toLowerCase().startsWith("pet")
               ? "petal"
               : query),
+        translation: german ? "ngôi nhà" : "cánh hoa",
+        pronunciation: german ? "/haʊ̯s/" : "/ˈpet.əl/",
+        partOfSpeech: german ? "Substantiv" : "noun",
         score: 987,
         match: inputLanguage === sourceLanguage ? "prefix" : "translated_prefix",
         inputLanguage,
@@ -322,6 +325,8 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     assert.equal(suggested.response.status, 200);
     assert.equal(suggested.payload.suggestions[0].term, "petal");
     assert.equal(suggested.payload.suggestions[0].normalizedTerm, "petal");
+    assert.equal(suggested.payload.suggestions[0].translation, "cánh hoa");
+    assert.equal(suggested.payload.suggestions[0].partOfSpeech, "noun");
     assert.equal(suggested.payload.suggestions[0].selectable, true);
     assert.equal(suggested.payload.meta.mode, "prefix");
     const selectionToken = suggested.payload.suggestions[0].selectionToken;
@@ -387,6 +392,8 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     assert.equal(suggested.response.status, 200);
     assert.equal(suggested.payload.suggestions[0].term, "Haus");
     assert.equal(suggested.payload.suggestions[0].normalizedTerm, "haus");
+    assert.equal(suggested.payload.suggestions[0].translation, "ngôi nhà");
+    assert.equal(suggested.payload.suggestions[0].partOfSpeech, "Substantiv");
     assert.equal(suggested.payload.suggestions[0].selectable, true);
     assert.equal(suggested.payload.meta.supported, true);
     assert.equal(suggested.payload.meta.suggestionProvider, "wiktionary_de");

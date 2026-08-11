@@ -319,9 +319,10 @@ Trong **Thêm mới → Từ vựng**, gõ ít nhất 2 ký tự của từ đan
 Luồng lưu diễn ra như sau:
 
 1. Datamuse tìm gợi ý tiếng Anh; Wiktionary Đức tìm gợi ý tiếng Đức theo tiền tố (API tối đa 10, UI hiện tối đa 8).
-2. Mỗi gợi ý mang một `selectionToken` ngắn hạn, gắn với người dùng và cặp ngôn ngữ. Mặc định token hết hạn sau 5 phút; nếu để quá lâu, hãy gõ/chọn lại.
-3. Khi lưu, backend tra lại đúng từ đã chọn: tiếng Anh qua Free Dictionary API; tiếng Đức qua Wiktionary và bắt buộc trang phải có mục ngôn ngữ `Deutsch`. Từ không được xác nhận sẽ bị từ chối.
-4. MyMemory dịch từ chuẩn sang ngôn ngữ mẹ đẻ trong hồ sơ. Từ, nghĩa, phiên âm, từ loại và ví dụ khả dụng được lưu tự động; luồng một ô không nhận nội dung nghĩa tự sửa từ trình duyệt.
+2. Backend xác thực và dịch từng gợi ý để danh sách hiển thị ngay nghĩa bằng ngôn ngữ mẹ đẻ, kèm phiên âm/từ loại khi nguồn từ điển có dữ liệu. Kết quả được lưu đệm để hạn chế gọi lại dịch vụ khi tiếp tục gõ.
+3. Mỗi gợi ý mang một `selectionToken` ngắn hạn, gắn với người dùng và cặp ngôn ngữ. Mặc định token hết hạn sau 5 phút; nếu để quá lâu, hãy gõ/chọn lại.
+4. Khi lưu, backend tra lại đúng từ đã chọn: tiếng Anh qua Free Dictionary API; tiếng Đức qua Wiktionary và bắt buộc trang phải có mục ngôn ngữ `Deutsch`. Từ không được xác nhận sẽ bị từ chối.
+5. MyMemory dịch từ chuẩn sang ngôn ngữ mẹ đẻ trong hồ sơ. Từ, nghĩa, phiên âm, từ loại và ví dụ khả dụng được lưu tự động; luồng một ô không nhận nội dung nghĩa tự sửa từ trình duyệt.
 
 Tại thời điểm tháng 8/2026, cấu hình mặc định chưa cần API key. [Datamuse công bố](https://www.datamuse.com/api/) mức dùng không khóa tối đa 100.000 truy vấn/ngày đến hết 31/12/2026 và sẽ yêu cầu key từ 01/01/2027; ứng dụng hiện chưa có biến key riêng, nên trước mốc đó cần cập nhật tích hợp hoặc trỏ `DICTIONARY_SUGGEST_API_BASE_URL` tới một endpoint/proxy tương thích. Tính năng cần Internet và có thể tạm lỗi/đạt giới hạn; khi đó ứng dụng không lưu kết quả chưa được xác thực mà yêu cầu thử lại.
 

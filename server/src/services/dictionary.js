@@ -51,6 +51,7 @@ class FreeDictionaryProvider {
   constructor({ baseUrl, fetchImpl = globalThis.fetch }) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.fetch = fetchImpl;
+    this.name = "free_dictionary";
   }
 
   supportsLanguage(language) {
@@ -455,6 +456,68 @@ export class DictionaryService {
     return null;
   }
 
+  async enrichSuggestion(row, {
+    source,
+    target,
+    inputLanguage,
+    mode,
+    normalizedQuery,
+    exactProvider,
+    suggestionProvider,
+  }) {
+    const requestedTerm = clean(row.term, 200);
+    const requestedKey = normalizeTerm(requestedTerm);
+    if (!requestedTerm || !requestedKey) return null;
+
+    const cacheKey = ["suggestion-preview", source, target, requestedKey].join("|");
+    const cached = cacheGet(this.cache, cacheKey);
+    if (cached) {
+      return {
+        ...cached,
+        inputLanguage,
+        score: row.score,
+        match: requestedKey === normalizedQuery ? "exact" : mode,
+        suggestionProvider: suggestionProvider.name || this.suggestionProviderName,
+      };
+    }
+
+    const entries = await exactProvider.search(requestedTerm, source, target);
+    const candidate = entries.find((entry) => normalizeTerm(entry.term) === requestedKey);
+    if (!candidate) return null;
+
+    const canonicalTerm = clean(candidate.term, 200);
+    const definition = clean(candidate.definition || candidate.translation, 1000);
+    let translation = definition || canonicalTerm;
+    if (target !== source) {
+      const translated = await this.translationProvider.translate(canonicalTerm, source, target);
+      translation = clean(translated.text, 1000);
+    }
+    if (!translation) return null;
+
+    const preview = {
+      term: canonicalTerm,
+      word: canonicalTerm,
+      normalizedTerm: normalizeTerm(canonicalTerm),
+      pronunciation: clean(candidate.pronunciation, 300),
+      partOfSpeech: clean(candidate.partOfSpeech, 80),
+      definition,
+      translation,
+      example: clean(candidate.example, 3000),
+      sourceUrl: safeHttpsUrl(candidate.sourceUrl),
+      sourceLanguage: source,
+      targetLanguage: target,
+      provider: candidate.provider || exactProvider.name || this.providerName,
+    };
+    cacheSet(this.cache, cacheKey, preview, 6 * 60 * 60 * 1000);
+    return {
+      ...preview,
+      inputLanguage,
+      score: row.score,
+      match: requestedKey === normalizedQuery ? "exact" : mode,
+      suggestionProvider: suggestionProvider.name || this.suggestionProviderName,
+    };
+  }
+
   async suggest(query, sourceLanguage, targetLanguage, options = {}) {
     const source = String(sourceLanguage).toLowerCase();
     const target = String(targetLanguage).toLowerCase();
@@ -522,29 +585,29 @@ export class DictionaryService {
 
     const seen = new Set();
     const normalizedQuery = normalizeTerm(lookupQuery);
-    const suggestions = rows.flatMap((row) => {
+    const uniqueRows = rows.flatMap((row) => {
       const term = clean(row.term, 200);
       const normalized = normalizeTerm(term);
       if (!term || !normalized || seen.has(normalized)) return [];
       seen.add(normalized);
-      return [{
-        term,
-        word: term,
-        normalizedTerm: normalized,
-        pronunciation: "",
-        partOfSpeech: "",
-        definition: "",
-        translation: "",
-        example: "",
-        sourceLanguage: source,
-        targetLanguage: target,
-        inputLanguage,
-        score: row.score,
-        match: normalized === normalizedQuery ? "exact" : mode,
-        provider: exactProvider.name || this.providerName,
-        suggestionProvider: suggestionProvider.name || this.suggestionProviderName,
-      }];
+      return [{ ...row, term }];
     }).slice(0, limit);
+
+    const enriched = await Promise.allSettled(uniqueRows.map((row) => this.enrichSuggestion(row, {
+      source,
+      target,
+      inputLanguage,
+      mode,
+      normalizedQuery,
+      exactProvider,
+      suggestionProvider,
+    })));
+    const suggestions = enriched
+      .filter((result) => result.status === "fulfilled" && result.value)
+      .map((result) => result.value);
+    const firstFailure = enriched.find((result) => result.status === "rejected");
+    if (!suggestions.length && firstFailure) throw firstFailure.reason;
+    if (firstFailure && !warning) warning = "DICTIONARY_PREVIEW_PARTIAL";
 
     return cacheSet(this.cache, cacheKey, {
       suggestions,

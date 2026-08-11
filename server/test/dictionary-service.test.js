@@ -26,7 +26,7 @@ function dictionaryPayload(word = "petal") {
   }];
 }
 
-test("DictionaryService suggests English prefixes without eagerly resolving every candidate", async () => {
+test("DictionaryService enriches English suggestions with native-language meanings", async () => {
   const calls = [];
   const fetchImpl = async (input) => {
     const url = new URL(String(input));
@@ -40,7 +40,21 @@ test("DictionaryService suggests English prefixes without eagerly resolving ever
         { word: "petals", score: 80 },
       ]);
     }
-    throw new Error(`Unexpected eager provider call: ${url}`);
+    if (url.hostname === "dictionary.test") {
+      const word = decodeURIComponent(url.pathname.split("/").at(-1));
+      return Response.json(dictionaryPayload(word));
+    }
+    if (url.hostname === "translate.test") {
+      const word = url.searchParams.get("q");
+      return Response.json({
+        responseStatus: 200,
+        responseData: {
+          translatedText: word === "petals" ? "những cánh hoa" : "cánh hoa",
+          match: 0.98,
+        },
+      });
+    }
+    throw new Error(`Unexpected provider call: ${url}`);
   };
   const service = new DictionaryService(serviceConfig, { fetchImpl });
   const result = await service.suggest("pet", "en", "vi", {
@@ -51,8 +65,11 @@ test("DictionaryService suggests English prefixes without eagerly resolving ever
   assert.equal(result.supported, true);
   assert.equal(result.mode, "prefix");
   assert.deepEqual(result.suggestions.map((item) => item.term), ["petal", "petals"]);
-  assert.ok(result.suggestions.every((item) => item.translation === ""));
-  assert.equal(calls.length, 1, "typing should make one autocomplete request, not N detail calls");
+  assert.deepEqual(result.suggestions.map((item) => item.translation), ["cánh hoa", "những cánh hoa"]);
+  assert.ok(result.suggestions.every((item) => item.partOfSpeech === "noun"));
+  assert.equal(calls.filter((url) => url.hostname === "suggest.test").length, 1);
+  assert.equal(calls.filter((url) => url.hostname === "dictionary.test").length, 2);
+  assert.equal(calls.filter((url) => url.hostname === "translate.test").length, 2);
 });
 
 test("DictionaryService supports native-language input and resolves one selected term", async () => {
@@ -94,8 +111,8 @@ test("DictionaryService supports native-language input and resolves one selected
   assert.equal(selected.translation, "cánh hoa & cánh bông");
   assert.equal(selected.translationProvider, "mymemory");
   assert.equal(selected.partOfSpeech, "noun");
-  assert.equal(calls.filter((url) => url.hostname === "dictionary.test").length, 1);
-  assert.equal(calls.filter((url) => url.hostname === "translate.test").length, 2);
+  assert.equal(calls.filter((url) => url.hostname === "dictionary.test").length, 2);
+  assert.equal(calls.filter((url) => url.hostname === "translate.test").length, 3);
 });
 
 test("DictionaryService suggests German titles and verifies the German Wiktionary section before saving", async () => {
@@ -119,21 +136,21 @@ test("DictionaryService suggests German titles and verifies the German Wiktionar
       ]);
     }
     if (url.hostname === "wiktionary.test" && url.searchParams.get("action") === "query") {
-      assert.equal(url.searchParams.get("titles"), "Haus");
+      const title = url.searchParams.get("titles");
       assert.equal(url.searchParams.get("rvslots"), "main");
       return Response.json({
         query: {
           pages: [{
             pageid: 123,
             ns: 0,
-            title: "Haus",
+            title,
             revisions: [{
               slots: {
                 main: {
                   content: [
-                    "== Haus ({{Sprache|Deutsch}}) ==",
-                    "=== {{Wortart|Substantiv|Deutsch}}, {{n}} ===",
-                    ":{{Lautschrift|haʊ̯s}}",
+                    `== ${title} ({{Sprache|Deutsch}}) ==`,
+                    `=== {{Wortart|${title === "hausen" ? "Verb" : "Substantiv"}|Deutsch}} ===`,
+                    `:{{Lautschrift|${title === "Haus" ? "haʊ̯s" : "test"}}}`,
                   ].join("\n"),
                 },
               },
@@ -143,11 +160,18 @@ test("DictionaryService suggests German titles and verifies the German Wiktionar
       });
     }
     if (url.hostname === "translate.test") {
-      assert.equal(url.searchParams.get("q"), "Haus");
+      const term = url.searchParams.get("q");
       assert.equal(url.searchParams.get("langpair"), "de|vi");
       return Response.json({
         responseStatus: 200,
-        responseData: { translatedText: "ngôi nhà", match: 0.98 },
+        responseData: {
+          translatedText: {
+            Haus: "ngôi nhà",
+            Hausarbeit: "bài tập về nhà",
+            hausen: "ở; cư trú",
+          }[term],
+          match: 0.98,
+        },
       });
     }
     throw new Error(`Unexpected provider call: ${url}`);
@@ -162,8 +186,17 @@ test("DictionaryService suggests German titles and verifies the German Wiktionar
   assert.equal(result.mode, "prefix");
   assert.equal(result.suggestionProvider, "wiktionary_de");
   assert.deepEqual(result.suggestions.map((item) => item.term), ["Haus", "Hausarbeit", "hausen"]);
-  assert.ok(result.suggestions.every((item) => item.translation === ""));
-  assert.equal(calls.length, 1, "typing should not eagerly download every Wiktionary page");
+  assert.deepEqual(
+    result.suggestions.map((item) => item.translation),
+    ["ngôi nhà", "bài tập về nhà", "ở; cư trú"],
+  );
+  assert.deepEqual(
+    result.suggestions.map((item) => item.partOfSpeech),
+    ["Substantiv", "Substantiv", "Verb"],
+  );
+  assert.equal(calls.filter((url) => url.searchParams.get("action") === "opensearch").length, 1);
+  assert.equal(calls.filter((url) => url.searchParams.get("action") === "query").length, 3);
+  assert.equal(calls.filter((url) => url.hostname === "translate.test").length, 3);
 
   const selected = await service.resolveSelection("Haus", "de", "vi");
   assert.equal(selected.term, "Haus", "German noun capitalization must be preserved");

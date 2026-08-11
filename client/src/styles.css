@@ -1407,6 +1407,8 @@ svg {
 .typeahead-menu button > span:nth-child(2) { grid-column: 1 / -1; }
 .typeahead-menu button strong { font-family: Georgia, serif; font-size: 15px; }
 .typeahead-menu button small { color: var(--soft-muted); font-size: 9px; }
+.typeahead-menu button .typeahead-meaning { display: grid; gap: 2px; color: #405c50; }
+.typeahead-menu button .typeahead-meaning b { font-size: 11px; font-weight: 800; line-height: 1.4; }
 .typeahead-menu button em { padding: 3px 7px; color: var(--pink-900); border-radius: 9px; background: var(--pink-100); font-size: 8px; font-style: normal; white-space: nowrap; }
 
 .typeahead-status { min-height: 31px; margin-top: -10px; color: var(--muted); font-size: 10.5px; }
