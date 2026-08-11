@@ -1352,6 +1352,8 @@ svg {
 .form-actions .button { width: 100%; }
 
 .word-typeahead { min-width: 0; }
+.typeahead-meaning-hint { margin-top: -5px; }
+.typeahead-meaning-hint .field__label small { color: var(--soft-muted); font-size: 10px; font-weight: 650; }
 
 .typeahead-input-wrap {
   min-width: 0;

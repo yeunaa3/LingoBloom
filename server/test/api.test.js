@@ -51,7 +51,7 @@ const dictionaryService = {
       definitions: [],
     }];
   },
-  async suggest(query, sourceLanguage, targetLanguage, { inputLanguage }) {
+  async suggest(query, sourceLanguage, targetLanguage, { inputLanguage, meaningHint }) {
     if (!["en", "de"].includes(sourceLanguage)) {
       return {
         suggestions: [],
@@ -68,7 +68,7 @@ const dictionaryService = {
           : (inputLanguage !== sourceLanguage || query.toLowerCase().startsWith("pet")
               ? "petal"
               : query),
-        translation: german ? "ngôi nhà" : "cánh hoa",
+        translation: meaningHint || (german ? "ngôi nhà" : "cánh hoa"),
         pronunciation: german ? "/haʊ̯s/" : "/ˈpet.əl/",
         partOfSpeech: german ? "Substantiv" : "noun",
         score: 987,
@@ -79,6 +79,7 @@ const dictionaryService = {
       mode: inputLanguage === sourceLanguage ? "prefix" : "translated_prefix",
       inputLanguage,
       lookupQuery: inputLanguage === sourceLanguage ? query : (german ? "Haus" : "petal"),
+      meaningHintUsed: Boolean(meaningHint),
       suggestionProvider: german ? "wiktionary_de" : "test_suggestions",
     };
   },
@@ -320,13 +321,14 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     assert.equal(tooShort.payload.meta.mode, "waiting");
 
     const suggested = await request(
-      "/api/dictionary/suggestions?q=pet&source=en&target=vi&inputLanguage=en&limit=5",
+      `/api/dictionary/suggestions?q=pet&source=en&target=vi&inputLanguage=en&limit=5&meaning=${encodeURIComponent("cánh hoa thực vật")}`,
     );
     assert.equal(suggested.response.status, 200);
     assert.equal(suggested.payload.suggestions[0].term, "petal");
     assert.equal(suggested.payload.suggestions[0].normalizedTerm, "petal");
-    assert.equal(suggested.payload.suggestions[0].translation, "cánh hoa");
+    assert.equal(suggested.payload.suggestions[0].translation, "cánh hoa thực vật");
     assert.equal(suggested.payload.suggestions[0].partOfSpeech, "noun");
+    assert.equal(suggested.payload.meta.meaningHintUsed, true);
     assert.equal(suggested.payload.suggestions[0].selectable, true);
     assert.equal(suggested.payload.meta.mode, "prefix");
     const selectionToken = suggested.payload.suggestions[0].selectionToken;
@@ -371,7 +373,7 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     });
     assert.equal(saved.response.status, 201);
     assert.equal(saved.payload.word.term, "petal");
-    assert.equal(saved.payload.word.translation, "cánh hoa");
+    assert.equal(saved.payload.word.translation, "cánh hoa thực vật");
     assert.equal(saved.payload.word.language, "en");
     assert.equal(saved.payload.word.nativeLanguage, "vi");
     assert.equal(saved.payload.word.bookmarked, true);

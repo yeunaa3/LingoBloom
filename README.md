@@ -314,15 +314,15 @@ Cấu trúc câu dùng `pattern,meaning,example,notes`. TXT ổn định nhất 
 
 ## Thêm từ bằng một ô gợi ý
 
-Trong **Thêm mới → Từ vựng**, gõ ít nhất 2 ký tự của từ đang học. Gợi ý xuất hiện tự động; bạn phải chọn một mục trong danh sách rồi nhấn **Lưu từ đã chọn**. Chỉ gõ nội dung tự do mà không chọn candidate sẽ không lưu được.
+Trong **Thêm mới → Từ vựng**, gõ ít nhất 2 ký tự của từ đang học. Có thể nhập thêm **Nghĩa bạn muốn** bằng ngôn ngữ mẹ đẻ để hệ thống dịch ngược, ưu tiên từ phù hợp và giữ nghĩa đó trong lựa chọn đã ký. Bạn vẫn phải chọn một mục trong danh sách rồi nhấn **Lưu từ đã chọn**; chỉ gõ nội dung tự do mà không chọn candidate sẽ không lưu được.
 
 Luồng lưu diễn ra như sau:
 
-1. Datamuse tìm gợi ý tiếng Anh; Wiktionary Đức tìm gợi ý tiếng Đức theo tiền tố (API tối đa 10, UI hiện tối đa 8).
+1. Datamuse tìm gợi ý tiếng Anh; Wiktionary Đức tìm gợi ý tiếng Đức theo tiền tố (UI hiện tối đa 10). Nếu có nghĩa mong muốn, hệ thống dùng cả bản dịch ngược của nghĩa này để mở rộng và xếp lại kết quả.
 2. Backend xác thực và dịch từng gợi ý để danh sách hiển thị ngay nghĩa bằng ngôn ngữ mẹ đẻ, kèm phiên âm/từ loại khi nguồn từ điển có dữ liệu. Kết quả được lưu đệm để hạn chế gọi lại dịch vụ khi tiếp tục gõ.
 3. Mỗi gợi ý mang một `selectionToken` ngắn hạn, gắn với người dùng và cặp ngôn ngữ. Mặc định token hết hạn sau 5 phút; nếu để quá lâu, hãy gõ/chọn lại.
 4. Khi lưu, backend tra lại đúng từ đã chọn: tiếng Anh qua Free Dictionary API; tiếng Đức qua Wiktionary và bắt buộc trang phải có mục ngôn ngữ `Deutsch`. Từ không được xác nhận sẽ bị từ chối.
-5. MyMemory dịch từ chuẩn sang ngôn ngữ mẹ đẻ trong hồ sơ. Từ, nghĩa, phiên âm, từ loại và ví dụ khả dụng được lưu tự động; luồng một ô không nhận nội dung nghĩa tự sửa từ trình duyệt.
+5. MyMemory dịch từ chuẩn sang ngôn ngữ mẹ đẻ trong hồ sơ. Nếu người dùng đã nhập nghĩa mong muốn và từ gợi ý khớp với kết quả dịch ngược, nghĩa này được đưa vào token đã ký và lưu cùng từ; trình duyệt không thể sửa lén sau khi chọn.
 
 Tại thời điểm tháng 8/2026, cấu hình mặc định chưa cần API key. [Datamuse công bố](https://www.datamuse.com/api/) mức dùng không khóa tối đa 100.000 truy vấn/ngày đến hết 31/12/2026 và sẽ yêu cầu key từ 01/01/2027; ứng dụng hiện chưa có biến key riêng, nên trước mốc đó cần cập nhật tích hợp hoặc trỏ `DICTIONARY_SUGGEST_API_BASE_URL` tới một endpoint/proxy tương thích. Tính năng cần Internet và có thể tạm lỗi/đạt giới hạn; khi đó ứng dụng không lưu kết quả chưa được xác thực mà yêu cầu thử lại.
 
@@ -347,7 +347,7 @@ Trong **Ôn tập**, chọn cách ôn trước khi lọc ngày và chọn từng
 - Ngôn ngữ đang học → ngôn ngữ mẹ đẻ: màn hình đưa từ (`term`), bạn gõ nghĩa (`translation`).
 - Ngôn ngữ mẹ đẻ → ngôn ngữ đang học: màn hình đưa nghĩa, bạn gõ lại từ.
 
-Đáp án được chuẩn hóa Unicode NFKC, bỏ khoảng trắng đầu/cuối, gom nhiều khoảng trắng thành một và không phân biệt chữ hoa/thường. Dấu tiếng Việt và dấu câu vẫn có ý nghĩa. Khi trả lời bằng nghĩa, các nghĩa đã lưu ngăn bằng dấu phẩy, chấm phẩy hoặc `|` được chấp nhận như các phương án riêng; khi trả lời bằng từ đang học, đáp án phải khớp từ đã lưu sau bước chuẩn hóa trên.
+Đáp án được chấm theo kiểu dễ chịu hơn: không phân biệt chữ hoa/thường, bỏ dấu tiếng Việt/dấu thanh, bỏ dấu câu và gom khoảng trắng. Ví dụ `cùng nhau`, `CUNG NHAU!` và `Cùng nhau...` được coi là giống nhau; tiếng Đức cũng chấp nhận `fur` cho `für` và `gross` cho `groß`. Khi trả lời bằng nghĩa, các nghĩa đã lưu ngăn bằng dấu phẩy, chấm phẩy hoặc `|` vẫn được chấp nhận như các phương án riêng.
 
 Mỗi câu chỉ được chấm và ghi lịch một lần. Đúng được lưu tương đương mức **Nhớ / `good`** (ôn lại sau 3 ngày); sai tương đương **Chưa nhớ / `again`** (ôn lại sau 10 phút). Sau khi kiểm tra, ô nhập bị khóa và hiển thị đáp án trước khi chuyển câu. Bộ thẻ và chiều ngôn ngữ được cố định từ lúc bắt đầu phiên, còn bộ lọc theo ngày/tìm kiếm/chọn từng thẻ vẫn hoạt động như flashcard.
 

@@ -493,16 +493,18 @@ export const api = {
     return extract(payload, ['result']);
   },
 
-  async suggestDictionary(query, languages) {
+  async suggestDictionary(query, languages, meaning = '') {
     if (isLocalDemo()) {
       if (languages.learningLanguage !== 'en' || languages.nativeLanguage !== 'vi') {
         throw new Error(LOCAL_DICTIONARY_PAIR_MESSAGE);
       }
       const needle = query.normalize('NFKC').trim().toLocaleLowerCase('en');
+      const meaningNeedle = meaning.normalize('NFKC').trim().toLocaleLowerCase('vi');
       const saved = new Set(readLocalData().words.map((word) => word.term.normalize('NFKC').trim().toLocaleLowerCase('en')));
       return localDictionary
         .filter((entry) => !saved.has(entry.term.toLocaleLowerCase('en')) && entry.term.toLocaleLowerCase('en').includes(needle))
-        .slice(0, 8)
+        .sort((left, right) => Number(right.translation.toLocaleLowerCase('vi').includes(meaningNeedle)) - Number(left.translation.toLocaleLowerCase('vi').includes(meaningNeedle)))
+        .slice(0, 10)
         .map((entry, index) => ({
           ...normalizeWord(entry),
           id: `demo-dictionary-${entry.term}`,
@@ -519,8 +521,9 @@ export const api = {
       source: languages.learningLanguage,
       target: languages.nativeLanguage,
       inputLanguage: languages.learningLanguage,
-      limit: '8',
+      limit: '10',
     });
+    if (meaning.trim()) search.set('meaning', meaning.trim());
     const payload = await request(`/dictionary/suggestions?${search}`);
     if (payload?.meta?.supported === false) {
       throw new Error(DICTIONARY_SUPPORTED_LANGUAGE_MESSAGE);

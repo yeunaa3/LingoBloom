@@ -72,6 +72,47 @@ test("DictionaryService enriches English suggestions with native-language meanin
   assert.equal(calls.filter((url) => url.hostname === "translate.test").length, 2);
 });
 
+test("DictionaryService uses a native-language meaning hint to prioritize the intended word", async () => {
+  const calls = [];
+  const fetchImpl = async (input) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.hostname === "translate.test") {
+      const pair = url.searchParams.get("langpair");
+      const query = url.searchParams.get("q");
+      if (pair === "vi|en") {
+        assert.equal(query, "lên tàu");
+        return Response.json({ responseStatus: 200, responseData: { translatedText: "board", match: 0.97 } });
+      }
+      return Response.json({ responseStatus: 200, responseData: { translatedText: "tấm ván", match: 0.92 } });
+    }
+    if (url.hostname === "suggest.test") {
+      const query = url.searchParams.get("s");
+      return Response.json(query === "board"
+        ? [{ word: "board", score: 100 }, { word: "boarding", score: 80 }]
+        : [{ word: "boast", score: 90 }, { word: "board", score: 80 }]);
+    }
+    if (url.hostname === "dictionary.test") {
+      const word = decodeURIComponent(url.pathname.split("/").at(-1));
+      return Response.json(dictionaryPayload(word));
+    }
+    throw new Error(`Unexpected provider call: ${url}`);
+  };
+  const service = new DictionaryService(serviceConfig, { fetchImpl });
+
+  const result = await service.suggest("boa", "en", "vi", {
+    inputLanguage: "en",
+    meaningHint: "lên tàu",
+    limit: 5,
+  });
+
+  assert.equal(result.meaningHintUsed, true);
+  assert.equal(result.suggestions[0].term, "board");
+  assert.equal(result.suggestions[0].translation, "lên tàu");
+  assert.equal(result.suggestions[0].partOfSpeech, "");
+  assert.equal(calls.filter((url) => url.hostname === "translate.test" && url.searchParams.get("langpair") === "vi|en").length, 1);
+});
+
 test("DictionaryService supports native-language input and resolves one selected term", async () => {
   const calls = [];
   const fetchImpl = async (input) => {

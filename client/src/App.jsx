@@ -31,6 +31,7 @@ import {
   X,
 } from 'lucide-react';
 import { api, LANGUAGES, languageByCode } from './lib/api.js';
+import { normalizeQuizAnswer } from './lib/text.js';
 
 const NAV_ITEMS = [
   { id: 'home', label: 'Tổng quan', shortLabel: 'Hôm nay', icon: Home },
@@ -157,7 +158,7 @@ function quizCardContent(card, direction) {
   return {
     prompt,
     answer,
-    acceptedAnswers: [...new Set(alternatives.map((value) => normalizedText(value, direction?.answerLanguage || 'vi')).filter(Boolean))],
+    acceptedAnswers: [...new Set(alternatives.map((value) => normalizeQuizAnswer(value, direction?.answerLanguage || 'vi')).filter(Boolean))],
   };
 }
 
@@ -600,6 +601,7 @@ function WordForm({ user, onCreated, notify }) {
   const learningLanguage = userLanguage(user, 'learningLanguage', 'en');
   const nativeLanguage = userLanguage(user, 'nativeLanguage', 'vi');
   const [query, setQuery] = useState('');
+  const [meaningQuery, setMeaningQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -610,6 +612,7 @@ function WordForm({ user, onCreated, notify }) {
   const requestSequence = useRef(0);
   const listboxId = 'word-dictionary-suggestions';
   const trimmedQuery = query.trim();
+  const trimmedMeaning = meaningQuery.trim();
 
   useEffect(() => {
     const sequence = ++requestSequence.current;
@@ -625,7 +628,11 @@ function WordForm({ user, onCreated, notify }) {
     setError('');
     const timer = window.setTimeout(async () => {
       try {
-        const found = await api.suggestDictionary(trimmedQuery, { learningLanguage, nativeLanguage });
+        const found = await api.suggestDictionary(
+          trimmedQuery,
+          { learningLanguage, nativeLanguage },
+          trimmedMeaning,
+        );
         if (requestSequence.current !== sequence) return;
         const usable = found.filter(isSelectableDictionaryCandidate);
         setSuggestions(usable);
@@ -643,10 +650,16 @@ function WordForm({ user, onCreated, notify }) {
     }, 350);
 
     return () => window.clearTimeout(timer);
-  }, [learningLanguage, nativeLanguage, selected, trimmedQuery]);
+  }, [learningLanguage, nativeLanguage, selected, trimmedMeaning, trimmedQuery]);
 
   function changeQuery(value) {
     setQuery(value);
+    setSelected(null);
+    setError('');
+  }
+
+  function changeMeaning(value) {
+    setMeaningQuery(value);
     setSelected(null);
     setError('');
   }
@@ -689,6 +702,7 @@ function WordForm({ user, onCreated, notify }) {
       const created = await api.importDictionary(selected, { learningLanguage, nativeLanguage });
       onCreated(created);
       setQuery('');
+      setMeaningQuery('');
       setSelected(null);
       setSuggestions([]);
       setSearched(false);
@@ -707,7 +721,7 @@ function WordForm({ user, onCreated, notify }) {
 
   return (
     <form onSubmit={submit} className="word-typeahead-form">
-      <FormIntro icon={BookOpen} title="Thêm từ bằng từ điển" description="Gõ từ đang học, rồi chọn đúng gợi ý. Nghĩa, phiên âm và ví dụ (khi có) sẽ được lưu cùng từ." />
+      <FormIntro icon={BookOpen} title="Thêm từ bằng từ điển" description="Gõ từ đang học và có thể thêm nghĩa bạn muốn để tìm đúng từ nhanh hơn." />
       <div className="word-typeahead">
         <label className="field" htmlFor="word-typeahead-input">
           <span className="field__label">Từ bạn muốn thêm <b aria-hidden="true">*</b></span>
@@ -734,6 +748,19 @@ function WordForm({ user, onCreated, notify }) {
           <small className="field__hint" id="word-typeahead-help">
             {languageByCode(learningLanguage).name} → {languageByCode(nativeLanguage).name} · Gõ ít nhất 2 ký tự.
           </small>
+        </label>
+
+        <label className="field typeahead-meaning-hint" htmlFor="word-meaning-hint">
+          <span className="field__label">Nghĩa bạn muốn <small>(không bắt buộc)</small></span>
+          <input
+            id="word-meaning-hint"
+            type="text"
+            value={meaningQuery}
+            onChange={(event) => changeMeaning(event.target.value)}
+            placeholder={`Ví dụ bằng ${languageByCode(nativeLanguage).name}: cùng nhau`}
+            autoComplete="off"
+          />
+          <small className="field__hint">Hệ thống dùng nghĩa này để ưu tiên từ phù hợp; từ vẫn được xác thực trước khi lưu.</small>
         </label>
 
         {!selected && suggestions.length > 0 && (
@@ -1323,7 +1350,7 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
     if (typedSubmission.current === submissionKey) return;
     typedSubmission.current = submissionKey;
     const submittedAnswer = typedAnswer.trim();
-    const normalized = normalizedText(submittedAnswer, sessionDirection?.answerLanguage || 'vi');
+    const normalized = normalizeQuizAnswer(submittedAnswer, sessionDirection?.answerLanguage || 'vi');
     const correct = typedContent.acceptedAnswers.includes(normalized);
     const rating = correct ? 'good' : 'again';
     setSubmitting(true);

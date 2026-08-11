@@ -33,6 +33,7 @@ function issueSelectionToken({ candidate, userId, source, target, provider, secr
     required: true,
   });
   const normalizedTerm = normalizeKey(term);
+  const previewTranslation = text(candidate.translation, { name: "Nghĩa xem trước", max: 1000 });
   const issuedAt = Math.floor(Date.now() / 1000);
   const candidateId = candidateIdFor(provider, source, target, normalizedTerm);
   const payload = {
@@ -44,6 +45,7 @@ function issueSelectionToken({ candidate, userId, source, target, provider, secr
     source,
     target,
     provider,
+    previewTranslation,
     issuedAt,
     expiresAt: issuedAt + ttlSeconds,
   };
@@ -98,6 +100,10 @@ function verifySelectionToken(token, { userId, provider, secret }) {
     || !payload.candidateId
     || !payload.term
     || payload.normalizedTerm !== normalizeKey(payload.term)
+    || (payload.previewTranslation != null && (
+      typeof payload.previewTranslation !== "string"
+      || payload.previewTranslation.length > 1000
+    ))
     || !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(payload.source || "")
     || !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(payload.target || "")
     || !Number.isInteger(payload.issuedAt)
@@ -246,6 +252,10 @@ export function dictionaryRoutes({ db, service, config }) {
       max: 12,
       required: true,
     }).toLowerCase();
+    const meaningHint = text(req.query.meaning, {
+      name: "Nghĩa mong muốn",
+      max: 500,
+    });
     const inputLanguage = text(req.query.inputLanguage || req.query.input || source, {
       name: "Ngôn ngữ nhập",
       max: 12,
@@ -273,7 +283,7 @@ export function dictionaryRoutes({ db, service, config }) {
     }
 
     const result = typeof service.suggest === "function"
-      ? await service.suggest(query, source, target, { inputLanguage, limit })
+      ? await service.suggest(query, source, target, { inputLanguage, limit, meaningHint })
       : {
           suggestions: await service.search(query, source, target),
           supported: true,
@@ -300,6 +310,7 @@ export function dictionaryRoutes({ db, service, config }) {
         supported: result.supported !== false,
         reason: result.reason || null,
         resolvedQuery: result.lookupQuery || query,
+        meaningHintUsed: Boolean(result.meaningHintUsed),
         minQueryLength: 2,
         selectionTtlSeconds: context.ttlSeconds,
         warning: result.warning || null,
@@ -355,7 +366,7 @@ export function dictionaryRoutes({ db, service, config }) {
       userId: authenticatedUserId(req),
       term: canonicalTerm,
       termKey: payload.normalizedTerm,
-      translation: text(candidate.translation, {
+      translation: text(payload.previewTranslation || candidate.translation, {
         name: "Nghĩa",
         max: 1000,
         required: true,

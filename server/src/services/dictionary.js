@@ -462,6 +462,7 @@ export class DictionaryService {
     inputLanguage,
     mode,
     normalizedQuery,
+    meaningHint,
     exactProvider,
     suggestionProvider,
   }) {
@@ -474,6 +475,8 @@ export class DictionaryService {
     if (cached) {
       return {
         ...cached,
+        translation: row.meaningMatch && meaningHint ? meaningHint : cached.translation,
+        partOfSpeech: row.meaningMatch ? "" : cached.partOfSpeech,
         inputLanguage,
         score: row.score,
         match: requestedKey === normalizedQuery ? "exact" : mode,
@@ -511,6 +514,8 @@ export class DictionaryService {
     cacheSet(this.cache, cacheKey, preview, 6 * 60 * 60 * 1000);
     return {
       ...preview,
+      translation: row.meaningMatch && meaningHint ? meaningHint : preview.translation,
+      partOfSpeech: row.meaningMatch ? "" : preview.partOfSpeech,
       inputLanguage,
       score: row.score,
       match: requestedKey === normalizedQuery ? "exact" : mode,
@@ -522,6 +527,7 @@ export class DictionaryService {
     const source = String(sourceLanguage).toLowerCase();
     const target = String(targetLanguage).toLowerCase();
     const inputLanguage = String(options.inputLanguage || source).toLowerCase();
+    const meaningHint = clean(options.meaningHint, 500);
     const limit = Math.max(1, Math.min(10, Number(options.limit) || 8));
 
     const exactProvider = this.exactProviderFor(source);
@@ -566,7 +572,32 @@ export class DictionaryService {
       };
     }
 
-    const cacheKey = ["suggest", lookupQuery, source, target, inputLanguage, limit].join("|");
+    let meaningLookupTerm = "";
+    if (meaningHint.length >= 2) {
+      if (target === source) {
+        meaningLookupTerm = meaningHint;
+      } else {
+        const meaningCacheKey = ["meaning-lookup", target, source, normalizeTerm(meaningHint)].join("|");
+        const cachedMeaning = cacheGet(this.cache, meaningCacheKey);
+        if (cachedMeaning) {
+          meaningLookupTerm = cachedMeaning;
+        } else {
+          const translatedMeaning = await this.translationProvider.translate(meaningHint, target, source);
+          meaningLookupTerm = clean(translatedMeaning.text, 200);
+          if (meaningLookupTerm) cacheSet(this.cache, meaningCacheKey, meaningLookupTerm, 6 * 60 * 60 * 1000);
+        }
+      }
+    }
+
+    const cacheKey = [
+      "suggest",
+      lookupQuery,
+      source,
+      target,
+      inputLanguage,
+      limit,
+      normalizeTerm(meaningHint),
+    ].join("|");
     const cached = cacheGet(this.cache, cacheKey);
     if (cached) return cached;
 
@@ -581,6 +612,33 @@ export class DictionaryService {
       rows = exactEntries.map((entry) => ({ term: entry.term, score: null }));
       mode = "exact_fallback";
       warning = suggestionError.code || "DICTIONARY_SUGGESTIONS_UNAVAILABLE";
+    }
+
+    if (meaningLookupTerm) {
+      const normalizedTypedQuery = normalizeTerm(lookupQuery);
+      const translatedTerms = [
+        meaningLookupTerm,
+        ...meaningLookupTerm.split(/[^\p{L}\p{N}'’-]+/u),
+      ];
+      const exactMeaningRows = translatedTerms
+        .flatMap((rawTerm) => {
+          const term = clean(rawTerm, 200);
+          const comparable = normalizeTerm(term);
+          const matchIndex = comparable.indexOf(normalizedTypedQuery);
+          if (!term || matchIndex < 0) return [];
+          const suffix = matchIndex > 0 ? term.slice(matchIndex) : term;
+          return [suffix.toLocaleLowerCase(source), suffix, term];
+        })
+        .filter((term) => normalizeTerm(term).startsWith(normalizedTypedQuery))
+        .map((term) => ({ term, score: Number.MAX_SAFE_INTEGER, meaningMatch: true }));
+      try {
+        const related = await suggestionProvider.suggest(meaningLookupTerm, source, limit);
+        const relevant = related.filter((row) => normalizeTerm(row.term).startsWith(normalizedTypedQuery));
+        rows = [...exactMeaningRows, ...relevant, ...rows];
+      } catch (meaningSuggestionError) {
+        rows = [...exactMeaningRows, ...rows];
+        if (!warning) warning = meaningSuggestionError.code || "DICTIONARY_MEANING_HINT_PARTIAL";
+      }
     }
 
     const seen = new Set();
@@ -599,6 +657,7 @@ export class DictionaryService {
       inputLanguage,
       mode,
       normalizedQuery,
+      meaningHint,
       exactProvider,
       suggestionProvider,
     })));
@@ -616,6 +675,7 @@ export class DictionaryService {
       inputLanguage,
       lookupQuery,
       warning,
+      meaningHintUsed: Boolean(meaningHint && meaningLookupTerm),
       suggestionProvider: suggestionProvider.name || this.suggestionProviderName,
     }, 30_000);
   }
