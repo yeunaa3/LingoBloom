@@ -9,7 +9,7 @@ Dự án phù hợp cho nhu cầu cá nhân hoặc nhóm rất nhỏ (1–2 ngư
 - Đăng nhập Google OAuth 2.0 hoặc chế độ demo rõ ràng khi chưa cấu hình Google.
 - Chọn ngôn ngữ đang học và ngôn ngữ mẹ đẻ.
 - Dashboard, tìm kiếm, bookmark và thống kê học tập cơ bản.
-- Thêm từ tiếng Anh hoặc tiếng Đức bằng một ô gợi ý: chọn đúng từ, hệ thống tự xác thực, dịch nghĩa và lưu metadata từ điển.
+- Thêm từ tiếng Anh/Đức bằng gợi ý đã xác thực hoặc nhập thủ công từ, cụm từ và thành ngữ.
 - Thêm cấu trúc câu và import CSV/TXT UTF-8.
 - Ôn bằng flashcard tự đánh giá hoặc nhập đáp án theo chiều ngôn ngữ đã chọn.
 - Lọc bộ ôn theo thời điểm thêm (hôm nay, 7 ngày, 30 ngày, toàn bộ hoặc khoảng tùy chọn) và chọn riêng từng mục.
@@ -312,7 +312,12 @@ gentle,dịu dàng,adjective,/ˈdʒen.təl/,Be gentle with yourself.,
 
 Cấu trúc câu dùng `pattern,meaning,example,notes`. TXT ổn định nhất khi ngăn các trường bằng Tab theo thứ tự `term`, `translation`, `example`, `notes`. Ngôn ngữ được lấy từ cặp ngôn ngữ đang chọn trong hồ sơ.
 
-## Thêm từ bằng một ô gợi ý
+## Thêm từ bằng gợi ý hoặc nhập thủ công
+
+Trong **Thêm mới → Từ vựng** có hai lựa chọn:
+
+- **Gợi ý từ điển** dành cho từ đơn: tự gợi ý, xác thực và dịch nghĩa.
+- **Nhập từ/cụm từ** dành cho cụm từ, thành ngữ hoặc nội dung không có trong từ điển. Chỉ hai ô **Từ hoặc cụm từ** và **Nghĩa** là bắt buộc; phiên âm, từ loại, ví dụ và ghi chú đều có thể bỏ trống.
 
 Trong **Thêm mới → Từ vựng**, gõ ít nhất 2 ký tự của từ đang học. Có thể nhập thêm **Nghĩa bạn muốn** bằng ngôn ngữ mẹ đẻ để hệ thống dịch ngược, ưu tiên từ phù hợp và giữ nghĩa đó trong lựa chọn đã ký. Bạn vẫn phải chọn một mục trong danh sách rồi nhấn **Lưu từ đã chọn**; chỉ gõ nội dung tự do mà không chọn candidate sẽ không lưu được.
 

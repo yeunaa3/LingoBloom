@@ -597,7 +597,93 @@ function hasUsableQuizTranslation(item) {
   return !/^(chưa (có|thêm) nghĩa|không có nghĩa|no (translation|definition)|translation unavailable|unknown|pending|n\/a|[-–—])$/i.test(placeholder);
 }
 
-function WordForm({ user, onCreated, notify }) {
+function WordForm(props) {
+  const [mode, setMode] = useState('dictionary');
+  return (
+    <div>
+      <div className="word-entry-mode" role="group" aria-label="Cách thêm từ vựng">
+        <button type="button" className={mode === 'dictionary' ? 'is-active' : ''} aria-pressed={mode === 'dictionary'} onClick={() => setMode('dictionary')}>
+          <Search size={17} aria-hidden="true" /> Gợi ý từ điển
+        </button>
+        <button type="button" className={mode === 'manual' ? 'is-active' : ''} aria-pressed={mode === 'manual'} onClick={() => setMode('manual')}>
+          <FileText size={17} aria-hidden="true" /> Nhập từ/cụm từ
+        </button>
+      </div>
+      {mode === 'dictionary' ? <DictionaryWordForm {...props} /> : <ManualWordForm {...props} />}
+    </div>
+  );
+}
+
+const EMPTY_MANUAL_WORD = {
+  term: '',
+  translation: '',
+  pronunciation: '',
+  partOfSpeech: '',
+  example: '',
+  notes: '',
+};
+
+function ManualWordForm({ user, onCreated, notify }) {
+  const [fields, setFields] = useState({ ...EMPTY_MANUAL_WORD });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  function updateField(name, value) {
+    setFields((current) => ({ ...current, [name]: value }));
+    setError('');
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    const term = fields.term.trim();
+    const translation = fields.translation.trim();
+    if (!term || !translation) {
+      setError('Hãy điền cả từ/cụm từ và nghĩa. Các ô còn lại có thể bỏ trống.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const created = await api.createWord({
+        ...fields,
+        term,
+        translation,
+        pronunciation: fields.pronunciation.trim(),
+        partOfSpeech: fields.partOfSpeech.trim(),
+        example: fields.example.trim(),
+        notes: fields.notes.trim(),
+        language: userLanguage(user, 'learningLanguage', 'en'),
+        nativeLanguage: userLanguage(user, 'nativeLanguage', 'vi'),
+        source: 'manual',
+      });
+      onCreated(created);
+      setFields({ ...EMPTY_MANUAL_WORD });
+      notify(`Đã thêm “${created.term}” vào thư viện.`);
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="manual-word-form">
+      <FormIntro icon={FileText} title="Nhập từ hoặc cụm từ" description="Phù hợp với cụm từ, thành ngữ hoặc nội dung không có trong từ điển. Chỉ từ/cụm từ và nghĩa là bắt buộc." />
+      <div className="manual-word-grid">
+        <TextField label="Từ hoặc cụm từ" name="term" value={fields.term} onChange={(event) => updateField('term', event.target.value)} maxLength="200" required placeholder="Ví dụ: auf jeden Fall" autoFocus />
+        <TextField label="Nghĩa" name="translation" value={fields.translation} onChange={(event) => updateField('translation', event.target.value)} maxLength="1000" required placeholder="Ví dụ: trong mọi trường hợp, chắc chắn" />
+        <TextField label="Phiên âm (không bắt buộc)" name="pronunciation" value={fields.pronunciation} onChange={(event) => updateField('pronunciation', event.target.value)} maxLength="300" placeholder="Ví dụ: /aʊ̯f ˈjeːdn̩ fal/" />
+        <TextField label="Từ loại (không bắt buộc)" name="partOfSpeech" value={fields.partOfSpeech} onChange={(event) => updateField('partOfSpeech', event.target.value)} maxLength="80" placeholder="Ví dụ: cụm trạng từ" />
+        <TextField label="Ví dụ (không bắt buộc)" name="example" value={fields.example} onChange={(event) => updateField('example', event.target.value)} maxLength="3000" multiline placeholder="Ví dụ sử dụng trong câu" />
+        <TextField label="Ghi chú (không bắt buộc)" name="notes" value={fields.notes} onChange={(event) => updateField('notes', event.target.value)} maxLength="5000" multiline placeholder="Mẹo nhớ hoặc ngữ cảnh riêng của bạn" />
+      </div>
+      {error && <div className="inline-alert inline-alert--error" role="alert"><CircleAlert size={18} />{error}</div>}
+      <div className="form-actions"><Button type="submit" loading={saving} icon={Plus}>Lưu vào thư viện</Button></div>
+    </form>
+  );
+}
+
+function DictionaryWordForm({ user, onCreated, notify }) {
   const learningLanguage = userLanguage(user, 'learningLanguage', 'en');
   const nativeLanguage = userLanguage(user, 'nativeLanguage', 'vi');
   const [query, setQuery] = useState('');

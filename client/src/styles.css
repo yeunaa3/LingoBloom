@@ -1352,6 +1352,36 @@ svg {
 .form-actions .button { width: 100%; }
 
 .word-typeahead { min-width: 0; }
+.word-entry-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 16px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #faf6f8;
+}
+
+.word-entry-mode button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--muted);
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.word-entry-mode button.is-active { color: var(--pink-900); background: #fff; box-shadow: var(--shadow-sm); }
+.manual-word-grid { display: grid; gap: 0 12px; }
 .typeahead-meaning-hint { margin-top: -5px; }
 .typeahead-meaning-hint .field__label small { color: var(--soft-muted); font-size: 10px; font-weight: 650; }
 

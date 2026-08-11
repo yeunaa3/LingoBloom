@@ -249,6 +249,22 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     assert.equal(search.payload.data[0].id, wordId);
   });
 
+  await t.test("allows a manual phrase with only term and meaning", async () => {
+    const created = await request("/api/words", {
+      method: "POST",
+      body: { term: "auf jeden Fall", translation: "trong mọi trường hợp" },
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.payload.word.term, "auf jeden Fall");
+    assert.equal(created.payload.word.translation, "trong mọi trường hợp");
+    assert.equal(created.payload.word.pronunciation, "");
+    assert.equal(created.payload.word.partOfSpeech, "");
+    assert.equal(created.payload.word.example, "");
+    assert.equal(created.payload.word.notes, "");
+    const removed = await request(`/api/words/${created.payload.word.id}`, { method: "DELETE" });
+    assert.equal(removed.response.status, 200);
+  });
+
   let structureId;
   await t.test("supports sentence structure CRUD", async () => {
     const created = await request("/api/structures", {
