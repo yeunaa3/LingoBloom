@@ -77,7 +77,8 @@ function verifySelectionToken(token, { userId, provider, secret }) {
   }
   const expectedSignature = signatureFor(encoded, secret);
   if (
-    actualSignature.length !== expectedSignature.length
+    encodedSignature !== actualSignature.toString("base64url")
+    || actualSignature.length !== expectedSignature.length
     || !timingSafeEqual(actualSignature, expectedSignature)
   ) {
     throw invalidSelection();
@@ -290,7 +291,7 @@ export function dictionaryRoutes({ db, service, config }) {
       data: decorated,
       meta: {
         provider: service.providerName,
-        suggestionProvider: service.suggestionProviderName || null,
+        suggestionProvider: result.suggestionProvider || service.suggestionProviderName || null,
         translationProvider: service.translationProviderName || null,
         source,
         target,

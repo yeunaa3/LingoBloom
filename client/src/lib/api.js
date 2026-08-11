@@ -1,7 +1,7 @@
 const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 const LOCAL_SESSION_KEY = 'lingobloom.localSession';
 const LOCAL_DATA_KEY = 'lingobloom.localData.v1';
-const DICTIONARY_ENGLISH_ONLY_MESSAGE = 'Gợi ý tự động hiện chỉ hỗ trợ ngôn ngữ đang học là Tiếng Anh. Bạn có thể đổi ngôn ngữ học hoặc nhập danh sách bằng file CSV/TXT.';
+const DICTIONARY_SUPPORTED_LANGUAGE_MESSAGE = 'Gợi ý tự động hiện hỗ trợ ngôn ngữ đang học là Tiếng Anh hoặc Tiếng Đức. Bạn có thể đổi ngôn ngữ học hoặc nhập danh sách bằng file CSV/TXT.';
 const LOCAL_DICTIONARY_PAIR_MESSAGE = 'Từ điển demo ngoại tuyến hiện chỉ hỗ trợ cặp Tiếng Anh → Tiếng Việt. Hãy kết nối máy chủ hoặc chọn lại cặp ngôn ngữ này.';
 
 export const LANGUAGES = [
@@ -523,7 +523,7 @@ export const api = {
     });
     const payload = await request(`/dictionary/suggestions?${search}`);
     if (payload?.meta?.supported === false) {
-      throw new Error(DICTIONARY_ENGLISH_ONLY_MESSAGE);
+      throw new Error(DICTIONARY_SUPPORTED_LANGUAGE_MESSAGE);
     }
     const result = extract(payload, ['suggestions', 'results', 'entries', 'words']);
     return (Array.isArray(result) ? result : result ? [result] : []).map((entry, index) => ({

@@ -9,7 +9,7 @@ Dự án phù hợp cho nhu cầu cá nhân hoặc nhóm rất nhỏ (1–2 ngư
 - Đăng nhập Google OAuth 2.0 hoặc chế độ demo rõ ràng khi chưa cấu hình Google.
 - Chọn ngôn ngữ đang học và ngôn ngữ mẹ đẻ.
 - Dashboard, tìm kiếm, bookmark và thống kê học tập cơ bản.
-- Thêm từ bằng một ô gợi ý: chọn đúng từ, hệ thống tự xác thực, dịch nghĩa và lưu metadata từ điển.
+- Thêm từ tiếng Anh hoặc tiếng Đức bằng một ô gợi ý: chọn đúng từ, hệ thống tự xác thực, dịch nghĩa và lưu metadata từ điển.
 - Thêm cấu trúc câu và import CSV/TXT UTF-8.
 - Ôn bằng flashcard tự đánh giá hoặc nhập đáp án theo chiều ngôn ngữ đã chọn.
 - Lọc bộ ôn theo thời điểm thêm (hôm nay, 7 ngày, 30 ngày, toàn bộ hoặc khoảng tùy chọn) và chọn riêng từng mục.
@@ -168,6 +168,7 @@ APP_TIME_ZONE_OFFSET_MINUTES=420
 DICTIONARY_PROVIDER=free_dictionary
 DICTIONARY_API_BASE_URL=https://api.dictionaryapi.dev/api/v2/entries
 DICTIONARY_SUGGEST_API_BASE_URL=https://api.datamuse.com/sug
+DICTIONARY_GERMAN_WIKTIONARY_API_BASE_URL=https://de.wiktionary.org/w/api.php
 DICTIONARY_TRANSLATION_API_BASE_URL=https://api.mymemory.translated.net/get
 DICTIONARY_SELECTION_TTL_SECONDS=300
 ```
@@ -289,6 +290,7 @@ Backend đọc `.env` ở thư mục gốc hoặc `server/.env`. Mẫu đầy đ
 | `DICTIONARY_PROVIDER` | `free_dictionary` | Provider tra từ. |
 | `DICTIONARY_API_BASE_URL` | DictionaryAPI.dev | Endpoint nền của provider mặc định. |
 | `DICTIONARY_SUGGEST_API_BASE_URL` | Datamuse | Endpoint gợi ý tiền tố tiếng Anh. |
+| `DICTIONARY_GERMAN_WIKTIONARY_API_BASE_URL` | Wiktionary Đức | Endpoint MediaWiki để gợi ý và xác thực từ tiếng Đức; không cần API key. |
 | `DICTIONARY_TRANSLATION_API_BASE_URL` | MyMemory | Endpoint dịch từ đã xác thực sang ngôn ngữ mẹ đẻ. |
 | `DICTIONARY_SELECTION_TTL_SECONDS` | `300` | Số giây một lựa chọn còn hiệu lực; backend giới hạn trong khoảng 60–900. |
 | `SERVE_CLIENT` | `true` | Express phục vụ bản build `client/dist`. |
@@ -316,18 +318,18 @@ Trong **Thêm mới → Từ vựng**, gõ ít nhất 2 ký tự của từ đan
 
 Luồng lưu diễn ra như sau:
 
-1. Datamuse tìm tối đa 10 gợi ý theo tiền tố (UI hiện tối đa 8).
+1. Datamuse tìm gợi ý tiếng Anh; Wiktionary Đức tìm gợi ý tiếng Đức theo tiền tố (API tối đa 10, UI hiện tối đa 8).
 2. Mỗi gợi ý mang một `selectionToken` ngắn hạn, gắn với người dùng và cặp ngôn ngữ. Mặc định token hết hạn sau 5 phút; nếu để quá lâu, hãy gõ/chọn lại.
-3. Khi lưu, backend tra lại đúng từ đã chọn bằng Free Dictionary API. Từ không còn khớp chính xác hoặc thiếu định nghĩa sẽ bị từ chối.
+3. Khi lưu, backend tra lại đúng từ đã chọn: tiếng Anh qua Free Dictionary API; tiếng Đức qua Wiktionary và bắt buộc trang phải có mục ngôn ngữ `Deutsch`. Từ không được xác nhận sẽ bị từ chối.
 4. MyMemory dịch từ chuẩn sang ngôn ngữ mẹ đẻ trong hồ sơ. Từ, nghĩa, phiên âm, từ loại và ví dụ khả dụng được lưu tự động; luồng một ô không nhận nội dung nghĩa tự sửa từ trình duyệt.
 
 Tại thời điểm tháng 8/2026, cấu hình mặc định chưa cần API key. [Datamuse công bố](https://www.datamuse.com/api/) mức dùng không khóa tối đa 100.000 truy vấn/ngày đến hết 31/12/2026 và sẽ yêu cầu key từ 01/01/2027; ứng dụng hiện chưa có biến key riêng, nên trước mốc đó cần cập nhật tích hợp hoặc trỏ `DICTIONARY_SUGGEST_API_BASE_URL` tới một endpoint/proxy tương thích. Tính năng cần Internet và có thể tạm lỗi/đạt giới hạn; khi đó ứng dụng không lưu kết quả chưa được xác thực mà yêu cầu thử lại.
 
 Giới hạn ngôn ngữ quan trọng:
 
-- Autocomplete và bước xác thực hiện chỉ hỗ trợ **ngôn ngữ đang học là tiếng Anh (`en`)**.
-- MyMemory cố dịch từ tiếng Anh sang ngôn ngữ mẹ đẻ đã chọn, nhưng chất lượng và số ngôn ngữ khả dụng phụ thuộc dịch vụ miễn phí. Nếu cần nghĩa chính xác theo ngữ cảnh, hãy dùng tệp CSV/TXT đã kiểm tra thay cho luồng gợi ý tự động.
-- Với ngôn ngữ đang học khác tiếng Anh, API trả danh sách rỗng với trạng thái không hỗ trợ thay vì tạo gợi ý giả. Có thể thêm dữ liệu bằng CSV/TXT; API thêm thủ công cũ vẫn được giữ để tương thích.
+- Autocomplete và bước xác thực hỗ trợ **tiếng Anh (`en`) và tiếng Đức (`de`)**. Danh từ tiếng Đức giữ đúng chữ hoa, ví dụ `Haus`.
+- MyMemory cố dịch từ tiếng Anh/Đức sang ngôn ngữ mẹ đẻ đã chọn, nhưng chất lượng và số ngôn ngữ khả dụng phụ thuộc dịch vụ miễn phí. Nếu cần nghĩa chính xác theo ngữ cảnh, hãy dùng tệp CSV/TXT đã kiểm tra thay cho luồng gợi ý tự động.
+- Với ngôn ngữ đang học khác tiếng Anh hoặc tiếng Đức, API trả danh sách rỗng với trạng thái không hỗ trợ thay vì tạo gợi ý giả. Có thể thêm dữ liệu bằng CSV/TXT; API thêm thủ công cũ vẫn được giữ để tương thích.
 - Demo chạy qua backend dùng cùng các provider thật. Chỉ khi frontend rơi về demo `localStorage` do không kết nối được backend, gợi ý mẫu offline mới giới hạn ở cặp Anh → Việt và không đồng bộ lên MongoDB.
 
 `selectionToken` được ký bằng `SESSION_SECRET`; không có secret từ điển mới. Đổi `SESSION_SECRET` sẽ làm các gợi ý đang chờ hết hiệu lực, nhưng không ảnh hưởng những từ đã lưu.
@@ -347,6 +349,8 @@ Trong **Ôn tập**, chọn cách ôn trước khi lọc ngày và chọn từng
 Đáp án được chuẩn hóa Unicode NFKC, bỏ khoảng trắng đầu/cuối, gom nhiều khoảng trắng thành một và không phân biệt chữ hoa/thường. Dấu tiếng Việt và dấu câu vẫn có ý nghĩa. Khi trả lời bằng nghĩa, các nghĩa đã lưu ngăn bằng dấu phẩy, chấm phẩy hoặc `|` được chấp nhận như các phương án riêng; khi trả lời bằng từ đang học, đáp án phải khớp từ đã lưu sau bước chuẩn hóa trên.
 
 Mỗi câu chỉ được chấm và ghi lịch một lần. Đúng được lưu tương đương mức **Nhớ / `good`** (ôn lại sau 3 ngày); sai tương đương **Chưa nhớ / `again`** (ôn lại sau 10 phút). Sau khi kiểm tra, ô nhập bị khóa và hiển thị đáp án trước khi chuyển câu. Bộ thẻ và chiều ngôn ngữ được cố định từ lúc bắt đầu phiên, còn bộ lọc theo ngày/tìm kiếm/chọn từng thẻ vẫn hoạt động như flashcard.
+
+Trong lúc đang ôn, nút **Quay lại chọn thẻ** cho phép thoát phiên. Những kết quả đã chấm vẫn được lưu, còn các thẻ chưa làm được giữ lại để chọn tiếp; nút bị khóa trong lúc hệ thống đang lưu một kết quả.
 
 Chế độ này không cần biến môi trường hay dịch vụ AI mới; việc chấm diễn ra trong frontend và lịch ôn được lưu qua API review hiện có.
 
@@ -380,7 +384,7 @@ Express phục vụ cả API và React tại [http://localhost:3001](http://loca
 - Render báo deploy thành công nhưng trang lỗi: xem **Logs**, kiểm tra `MONGODB_URI`, `MONGODB_DB_NAME` và `/api/health`.
 - Google báo `redirect_uri_mismatch`: callback trong Google Cloud chưa giống URL `/api/auth/google/callback` mà ứng dụng đang dùng; chỉ đặt `GOOGLE_CALLBACK_URL` để ghi đè khi cần.
 - Đăng nhập xong quay lại màn hình login: kiểm tra `SECURE_COOKIES=true`; nếu dùng custom domain, kiểm tra thêm `CLIENT_URL` và `GOOGLE_CALLBACK_URL`.
-- Không thấy gợi ý từ: cần chọn tiếng Anh (`en`) làm ngôn ngữ đang học, nhập ít nhất 2 ký tự và kiểm tra kết nối tới Datamuse/Free Dictionary/MyMemory. Nếu lựa chọn đã quá 5 phút, hãy gõ và chọn lại.
+- Không thấy gợi ý từ: chọn tiếng Anh (`en`) hoặc tiếng Đức (`de`) làm ngôn ngữ đang học, nhập ít nhất 2 ký tự và kiểm tra kết nối tới các dịch vụ từ điển/MyMemory. Nếu lựa chọn đã quá 5 phút, hãy gõ và chọn lại.
 - Không chọn được chế độ tự gõ: thư viện cần có ít nhất một từ với cả từ và nghĩa hợp lệ; cấu trúc câu không dùng trong chế độ này.
 - Lần mở đầu mất lâu: Render Free đang khởi động lại sau thời gian ngủ.
 - PowerShell chặn `npm.ps1`: dùng `npm.cmd install` và `npm.cmd run dev`.

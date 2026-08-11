@@ -48,6 +48,9 @@ export const config = {
     suggestionBaseUrl:
       process.env.DICTIONARY_SUGGEST_API_BASE_URL ||
       "https://api.datamuse.com/sug",
+    germanWiktionaryBaseUrl:
+      process.env.DICTIONARY_GERMAN_WIKTIONARY_API_BASE_URL ||
+      "https://de.wiktionary.org/w/api.php",
     translationBaseUrl:
       process.env.DICTIONARY_TRANSLATION_API_BASE_URL ||
       "https://api.mymemory.translated.net/get",

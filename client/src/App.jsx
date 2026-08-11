@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   ArrowRight,
   BarChart3,
   BookOpen,
@@ -706,7 +707,7 @@ function WordForm({ user, onCreated, notify }) {
 
   return (
     <form onSubmit={submit} className="word-typeahead-form">
-      <FormIntro icon={BookOpen} title="Thêm từ bằng từ điển" description="Gõ từ đang học, rồi chọn đúng gợi ý. Nghĩa, phiên âm và ví dụ sẽ được lưu cùng từ." />
+      <FormIntro icon={BookOpen} title="Thêm từ bằng từ điển" description="Gõ từ đang học, rồi chọn đúng gợi ý. Nghĩa, phiên âm và ví dụ (khi có) sẽ được lưu cùng từ." />
       <div className="word-typeahead">
         <label className="field" htmlFor="word-typeahead-input">
           <span className="field__label">Từ bạn muốn thêm <b aria-hidden="true">*</b></span>
@@ -1267,6 +1268,34 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function exitActiveReview() {
+    if (submitting) return;
+    const savedMessage = reviewedCount
+      ? `${reviewedCount} kết quả đã lưu vẫn được giữ.`
+      : 'Bạn chưa có kết quả nào được lưu.';
+    if (!window.confirm(`Thoát phiên ôn hiện tại?\n\n${savedMessage}`)) return;
+
+    // A typed answer is saved as soon as feedback is shown. Keep only cards that
+    // have not been submitted so returning to the setup cannot review one twice
+    // by accident. A flashcard at the current index is always still ungraded.
+    const firstUnreviewedIndex = index + (sessionStyle === 'typed' && typedResult ? 1 : 0);
+    const remainingKeys = deck.slice(firstUnreviewedIndex).map(reviewCardKey);
+    selectionTouched.current = true;
+    setSelectedKeys(new Set(remainingKeys));
+    setDeck([]);
+    setIndex(0);
+    setFlipped(false);
+    setTypedAnswer('');
+    setTypedResult(null);
+    typedSubmission.current = '';
+    setFinished(false);
+    setReviewedCount(0);
+    setMessage('');
+    setSessionDirection(null);
+    setChoosing(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   async function rate(rating) {
     if (!card || submitting) return;
     setSubmitting(true); setMessage('Đang lưu kết quả…');
@@ -1490,6 +1519,16 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
 
   return (
     <div className="page page--review">
+      <button
+        type="button"
+        className="review-session-back"
+        onClick={exitActiveReview}
+        disabled={submitting}
+        aria-label="Thoát phiên ôn và quay lại màn hình chọn thẻ"
+      >
+        <ArrowLeft size={18} aria-hidden="true" />
+        <span>Quay lại chọn thẻ</span>
+      </button>
       <PageTop
         title={sessionStyle === 'typed' ? 'Tự gõ đáp án' : 'Ôn tập flashcard'}
         description={sessionStyle === 'typed'

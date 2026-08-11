@@ -192,6 +192,131 @@ class DatamuseSuggestionProvider {
   }
 }
 
+class GermanWiktionaryProvider {
+  constructor({ baseUrl, fetchImpl = globalThis.fetch }) {
+    this.baseUrl = baseUrl;
+    this.fetch = fetchImpl;
+    this.name = "wiktionary_de";
+  }
+
+  supportsLanguage(language) {
+    return String(language).toLowerCase() === "de";
+  }
+
+  articleUrl(title) {
+    try {
+      const url = new URL(this.baseUrl);
+      url.pathname = `/wiki/${encodeURIComponent(clean(title, 200).replaceAll(" ", "_"))}`;
+      url.search = "";
+      url.hash = "";
+      return safeHttpsUrl(url.toString());
+    } catch {
+      return "";
+    }
+  }
+
+  async request(url) {
+    const response = await fetchJson(this.fetch, url, {
+      timeoutMs: 7000,
+      unavailableCode: "DICTIONARY_UNAVAILABLE",
+      unavailableMessage: "Không thể kết nối từ điển tiếng Đức.",
+      headers: { "Api-User-Agent": "LingoBloom/1.0 (personal vocabulary app)" },
+    });
+    if (!response.ok) {
+      throw new ApiError(
+        502,
+        "DICTIONARY_UNAVAILABLE",
+        "Từ điển tiếng Đức đang tạm thời không khả dụng.",
+      );
+    }
+    try {
+      return await response.json();
+    } catch {
+      throw new ApiError(
+        502,
+        "DICTIONARY_UNAVAILABLE",
+        "Từ điển tiếng Đức trả về dữ liệu không hợp lệ.",
+      );
+    }
+  }
+
+  async suggest(query, language, limit) {
+    if (!this.supportsLanguage(language)) return [];
+    const url = new URL(this.baseUrl);
+    url.searchParams.set("action", "opensearch");
+    url.searchParams.set("search", clean(query, 200));
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("namespace", "0");
+    url.searchParams.set("format", "json");
+    const payload = await this.request(url);
+    const titles = Array.isArray(payload?.[1]) ? payload[1] : null;
+    if (!titles) {
+      throw new ApiError(
+        502,
+        "DICTIONARY_SUGGESTIONS_UNAVAILABLE",
+        "Dịch vụ gợi ý từ tiếng Đức trả về dữ liệu không hợp lệ.",
+      );
+    }
+    return titles
+      .map((title) => ({
+        term: clean(title, 200),
+        score: null,
+        sourceUrl: this.articleUrl(title),
+      }))
+      .filter((row) => row.term)
+      .slice(0, limit);
+  }
+
+  async search(query, sourceLanguage, targetLanguage) {
+    if (!this.supportsLanguage(sourceLanguage)) return [];
+    const url = new URL(this.baseUrl);
+    url.searchParams.set("action", "query");
+    url.searchParams.set("prop", "revisions");
+    url.searchParams.set("rvprop", "content");
+    url.searchParams.set("rvslots", "main");
+    url.searchParams.set("titles", clean(query, 200));
+    url.searchParams.set("format", "json");
+    url.searchParams.set("formatversion", "2");
+    const payload = await this.request(url);
+    const page = Array.isArray(payload?.query?.pages) ? payload.query.pages[0] : null;
+    if (!page || page.missing === true || page.missing === "" || Number(page.ns) !== 0) return [];
+
+    const revision = Array.isArray(page.revisions) ? page.revisions[0] : null;
+    const content = clean(
+      revision?.slots?.main?.content
+        ?? revision?.slots?.main?.["*"]
+        ?? revision?.["*"],
+      2_000_000,
+    );
+    // German Wiktionary also contains entries for other languages. A page is
+    // only accepted by the strict save flow when it has a German section.
+    if (!/\{\{\s*Sprache\s*\|\s*Deutsch(?:\s*\||\s*\}\})/iu.test(content)) return [];
+
+    const term = clean(page.title || query, 200);
+    const partOfSpeech = clean(
+      content.match(/\{\{\s*Wortart\s*\|\s*([^|}]+?)\s*\|\s*Deutsch(?:\s*\||\s*\}\})/iu)?.[1],
+      80,
+    );
+    const ipa = clean(content.match(/\{\{\s*Lautschrift\s*\|\s*([^|}]+?)(?:\||\}\})/iu)?.[1], 280);
+    return [{
+      term,
+      word: term,
+      normalizedTerm: normalizeTerm(term),
+      pronunciation: ipa ? `/${ipa}/` : "",
+      audio: "",
+      sourceLanguage,
+      targetLanguage,
+      definitions: [],
+      definition: "",
+      translation: "",
+      partOfSpeech,
+      example: "",
+      sourceUrl: this.articleUrl(term),
+      provider: this.name,
+    }];
+  }
+}
+
 class MyMemoryTranslationProvider {
   constructor({ baseUrl, fetchImpl = globalThis.fetch }) {
     this.baseUrl = baseUrl;
@@ -296,6 +421,12 @@ export class DictionaryService {
       baseUrl: config.suggestionBaseUrl || "https://api.datamuse.com/sug",
       fetchImpl: options.suggestionFetchImpl || sharedFetch,
     });
+    this.germanProvider = new GermanWiktionaryProvider({
+      baseUrl:
+        config.germanWiktionaryBaseUrl
+        || "https://de.wiktionary.org/w/api.php",
+      fetchImpl: options.germanWiktionaryFetchImpl || sharedFetch,
+    });
     this.translationProvider = new MyMemoryTranslationProvider({
       baseUrl: config.translationBaseUrl || "https://api.mymemory.translated.net/get",
       fetchImpl: options.translationFetchImpl || sharedFetch,
@@ -304,11 +435,24 @@ export class DictionaryService {
   }
 
   supportsSelectionLanguage(language) {
-    return this.provider.supportsLanguage(language);
+    return Boolean(this.exactProviderFor(language));
   }
 
   async search(query, sourceLanguage, targetLanguage) {
-    return this.provider.search(query, sourceLanguage, targetLanguage);
+    const provider = this.exactProviderFor(sourceLanguage);
+    return provider ? provider.search(query, sourceLanguage, targetLanguage) : [];
+  }
+
+  exactProviderFor(language) {
+    if (this.provider.supportsLanguage(language)) return this.provider;
+    if (this.germanProvider.supportsLanguage(language)) return this.germanProvider;
+    return null;
+  }
+
+  suggestionProviderFor(language) {
+    if (this.suggestionProvider.supportsLanguage(language)) return this.suggestionProvider;
+    if (this.germanProvider.supportsLanguage(language)) return this.germanProvider;
+    return null;
   }
 
   async suggest(query, sourceLanguage, targetLanguage, options = {}) {
@@ -317,7 +461,9 @@ export class DictionaryService {
     const inputLanguage = String(options.inputLanguage || source).toLowerCase();
     const limit = Math.max(1, Math.min(10, Number(options.limit) || 8));
 
-    if (!this.provider.supportsLanguage(source) || !this.suggestionProvider.supportsLanguage(source)) {
+    const exactProvider = this.exactProviderFor(source);
+    const suggestionProvider = this.suggestionProviderFor(source);
+    if (!exactProvider || !suggestionProvider) {
       return {
         suggestions: [],
         supported: false,
@@ -364,7 +510,7 @@ export class DictionaryService {
     let rows;
     let warning = null;
     try {
-      rows = await this.suggestionProvider.suggest(lookupQuery, source, limit);
+      rows = await suggestionProvider.suggest(lookupQuery, source, limit);
     } catch (suggestionError) {
       // Autocomplete should degrade to an exact dictionary result when the
       // optional suggestion service is unavailable.
@@ -395,8 +541,8 @@ export class DictionaryService {
         inputLanguage,
         score: row.score,
         match: normalized === normalizedQuery ? "exact" : mode,
-        provider: this.providerName,
-        suggestionProvider: this.suggestionProviderName,
+        provider: exactProvider.name || this.providerName,
+        suggestionProvider: suggestionProvider.name || this.suggestionProviderName,
       }];
     }).slice(0, limit);
 
@@ -407,6 +553,7 @@ export class DictionaryService {
       inputLanguage,
       lookupQuery,
       warning,
+      suggestionProvider: suggestionProvider.name || this.suggestionProviderName,
     }, 30_000);
   }
 
@@ -417,7 +564,7 @@ export class DictionaryService {
       throw new ApiError(
         422,
         "DICTIONARY_LANGUAGE_NOT_SUPPORTED",
-        "Từ điển xác thực hiện chỉ hỗ trợ từ vựng tiếng Anh.",
+        "Từ điển xác thực hiện chỉ hỗ trợ từ vựng tiếng Anh và tiếng Đức.",
       );
     }
     const selectedKey = normalizeTerm(term);
@@ -432,8 +579,10 @@ export class DictionaryService {
     }
 
     const definition = clean(candidate.definition || candidate.translation, 1000);
-    let translation = definition;
-    let translationProvider = "free_dictionary_definition";
+    let translation = definition || clean(candidate.term, 1000);
+    let translationProvider = definition
+      ? `${candidate.provider || this.providerName}_definition`
+      : "identity";
     let translationQuality = null;
     if (target !== source) {
       const translated = await this.translationProvider.translate(candidate.term, source, target);

@@ -36,7 +36,7 @@ const dictionaryService = {
   suggestionProviderName: "test_suggestions",
   translationProviderName: "test_translation",
   supportsSelectionLanguage(language) {
-    return language === "en";
+    return ["en", "de"].includes(language);
   },
   async search(query, sourceLanguage, targetLanguage) {
     return [{
@@ -52,7 +52,7 @@ const dictionaryService = {
     }];
   },
   async suggest(query, sourceLanguage, targetLanguage, { inputLanguage }) {
-    if (sourceLanguage !== "en") {
+    if (!["en", "de"].includes(sourceLanguage)) {
       return {
         suggestions: [],
         supported: false,
@@ -60,11 +60,14 @@ const dictionaryService = {
         reason: "LEARNING_LANGUAGE_NOT_SUPPORTED",
       };
     }
+    const german = sourceLanguage === "de";
     return {
       suggestions: [{
-        term: inputLanguage !== sourceLanguage || query.toLowerCase().startsWith("pet")
-          ? "petal"
-          : query,
+        term: german
+          ? "Haus"
+          : (inputLanguage !== sourceLanguage || query.toLowerCase().startsWith("pet")
+              ? "petal"
+              : query),
         score: 987,
         match: inputLanguage === sourceLanguage ? "prefix" : "translated_prefix",
         inputLanguage,
@@ -72,19 +75,22 @@ const dictionaryService = {
       supported: true,
       mode: inputLanguage === sourceLanguage ? "prefix" : "translated_prefix",
       inputLanguage,
-      lookupQuery: inputLanguage === sourceLanguage ? query : "petal",
+      lookupQuery: inputLanguage === sourceLanguage ? query : (german ? "Haus" : "petal"),
+      suggestionProvider: german ? "wiktionary_de" : "test_suggestions",
     };
   },
   async resolveSelection(term, sourceLanguage, targetLanguage) {
-    if (term.toLowerCase() !== "petal") return null;
+    const german = sourceLanguage === "de";
+    if (german && term.toLowerCase() !== "haus") return null;
+    if (!german && term.toLowerCase() !== "petal") return null;
     return {
-      term: "petal",
-      word: "petal",
-      translation: targetLanguage === "vi" ? "cánh hoa" : "flower petal",
-      definition: "a coloured segment of a flower",
-      pronunciation: "/ˈpet.əl/",
-      partOfSpeech: "noun",
-      example: "A pink petal fell onto the table.",
+      term: german ? "Haus" : "petal",
+      word: german ? "Haus" : "petal",
+      translation: targetLanguage === "vi" ? (german ? "ngôi nhà" : "cánh hoa") : "test meaning",
+      definition: german ? "" : "a coloured segment of a flower",
+      pronunciation: german ? "/haʊ̯s/" : "/ˈpet.əl/",
+      partOfSpeech: german ? "Substantiv" : "noun",
+      example: german ? "Das Haus ist groß." : "A pink petal fell onto the table.",
       sourceLanguage,
       targetLanguage,
       translationProvider: "test_translation",
@@ -372,6 +378,29 @@ test("LingoBloom API supports the complete local learning flow", async (t) => {
     });
     assert.equal(replayed.response.status, 409);
     assert.equal(replayed.payload.error.code, "DUPLICATE_ITEM");
+  });
+
+  await t.test("suggests and strictly saves verified German vocabulary", async () => {
+    const suggested = await request(
+      "/api/dictionary/suggestions?q=hau&source=de&target=vi&inputLanguage=de&limit=5",
+    );
+    assert.equal(suggested.response.status, 200);
+    assert.equal(suggested.payload.suggestions[0].term, "Haus");
+    assert.equal(suggested.payload.suggestions[0].normalizedTerm, "haus");
+    assert.equal(suggested.payload.suggestions[0].selectable, true);
+    assert.equal(suggested.payload.meta.supported, true);
+    assert.equal(suggested.payload.meta.suggestionProvider, "wiktionary_de");
+
+    const saved = await request("/api/dictionary/selection", {
+      method: "POST",
+      body: { selectionToken: suggested.payload.suggestions[0].selectionToken },
+    });
+    assert.equal(saved.response.status, 201);
+    assert.equal(saved.payload.word.term, "Haus");
+    assert.equal(saved.payload.word.translation, "ngôi nhà");
+    assert.equal(saved.payload.word.language, "de");
+    assert.equal(saved.payload.word.nativeLanguage, "vi");
+    assert.equal(saved.payload.selection.verified, true);
   });
 
   await t.test("records a review, reschedules the card and updates stats", async () => {

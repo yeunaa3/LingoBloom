@@ -1795,6 +1795,24 @@ svg {
 /* Review */
 .page--review { width: min(100%, 800px); }
 
+.review-session-back {
+  min-height: 44px;
+  margin: -5px 0 10px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--pink-900);
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.review-session-back:not(:disabled):hover { background: var(--pink-100); }
+.review-session-back:disabled { color: var(--soft-muted); }
+
 .review-builder {
   display: grid;
   gap: 12px;
