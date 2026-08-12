@@ -10,6 +10,7 @@ Dự án phù hợp cho nhu cầu cá nhân hoặc nhóm rất nhỏ (1–2 ngư
 - Chọn ngôn ngữ đang học và ngôn ngữ mẹ đẻ.
 - Dashboard, tìm kiếm, bookmark và thống kê học tập cơ bản.
 - Thêm từ tiếng Anh/Đức bằng gợi ý đã xác thực hoặc nhập thủ công từ, cụm từ và thành ngữ.
+- Sửa hoặc xóa từ vựng, cụm từ và cấu trúc câu ngay trong thư viện.
 - Thêm cấu trúc câu và import CSV/TXT UTF-8.
 - Ôn bằng flashcard tự đánh giá hoặc nhập đáp án theo chiều ngôn ngữ đã chọn.
 - Lọc bộ ôn theo thời điểm thêm (hôm nay, 7 ngày, 30 ngày, toàn bộ hoặc khoảng tùy chọn) và chọn riêng từng mục.

@@ -20,6 +20,7 @@ import {
   LibraryBig,
   LoaderCircle,
   LogOut,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
@@ -1089,7 +1090,7 @@ function DictionaryLookup({ user, onCreated, notify }) {
   );
 }
 
-function LibraryPage({ words, structures, loading, onToggleBookmark, onDelete, onNavigate }) {
+function LibraryPage({ words, structures, loading, onToggleBookmark, onEdit, onDelete, onNavigate }) {
   const searchRef = useRef(null);
   const [kind, setKind] = useState('words');
   const [query, setQuery] = useState('');
@@ -1163,6 +1164,12 @@ function LibraryPage({ words, structures, loading, onToggleBookmark, onDelete, o
                 <span>{formatDate(item.createdAt)}</span>
               </div>
               <div className="library-card__actions">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`Sửa ${kind === 'words' ? item.term : item.pattern}`}
+                  onClick={() => onEdit(kind === 'words' ? 'word' : 'structure', item)}
+                ><Pencil size={18} /></button>
                 <button
                   type="button"
                   className={`icon-button ${item.bookmarked ? 'is-bookmarked' : ''}`}
@@ -1864,6 +1871,110 @@ function ProfilePanel({ user, onClose, onSave, onLogout }) {
   );
 }
 
+function EditItemPanel({ type, item, onClose, onSave }) {
+  const isWord = type === 'word';
+  const [fields, setFields] = useState(isWord ? {
+    term: item.term || '',
+    translation: item.translation || '',
+    pronunciation: item.pronunciation || '',
+    partOfSpeech: item.partOfSpeech || '',
+    example: item.example || '',
+    notes: item.notes || '',
+  } : {
+    pattern: item.pattern || '',
+    meaning: item.meaning || '',
+    example: item.example || '',
+    notes: item.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const panelRef = useRef(null);
+  const savingRef = useRef(false);
+  savingRef.current = saving;
+
+  function updateField(name, value) {
+    setFields((current) => ({ ...current, [name]: value }));
+    setError('');
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    const primary = String(isWord ? fields.term : fields.pattern).trim();
+    const meaning = String(isWord ? fields.translation : fields.meaning).trim();
+    if (!primary || !meaning) {
+      setError(`Hãy điền cả ${isWord ? 'từ/cụm từ' : 'cấu trúc'} và nghĩa.`);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(type, item, Object.fromEntries(
+        Object.entries({ ...fields, [isWord ? 'term' : 'pattern']: primary, [isWord ? 'translation' : 'meaning']: meaning })
+          .map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]),
+      ));
+      onClose();
+    } catch (caught) {
+      setError(caught.message || 'Chưa thể lưu thay đổi. Vui lòng thử lại.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    const panel = panelRef.current;
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    panel?.querySelector('input, textarea')?.focus();
+    function keydown(event) {
+      if (event.key === 'Escape' && !savingRef.current) { onClose(); return; }
+      if (event.key !== 'Tab' || !panel) return;
+      const focusable = [...panel.querySelectorAll(focusableSelector)];
+      if (!focusable.length) { event.preventDefault(); panel.focus(); return; }
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    document.addEventListener('keydown', keydown);
+    return () => {
+      document.removeEventListener('keydown', keydown);
+      previousFocus?.focus?.();
+    };
+  }, [onClose]);
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={(event) => { if (!saving && event.target === event.currentTarget) onClose(); }}>
+      <section ref={panelRef} className="profile-panel edit-item-panel" role="dialog" aria-modal="true" aria-labelledby="edit-item-title" tabIndex="-1">
+        <button type="button" className="modal-close" onClick={onClose} disabled={saving} aria-label="Đóng"><X size={20} /></button>
+        <div className="profile-heading edit-item-heading">
+          <span className="edit-item-heading__icon">{isWord ? <BookOpen size={22} /> : <FileText size={22} />}</span>
+          <div><h2 id="edit-item-title">{isWord ? 'Sửa từ hoặc cụm từ' : 'Sửa cấu trúc câu'}</h2><p>Thay đổi sẽ được cập nhật ngay trong thư viện và bộ ôn tập.</p></div>
+        </div>
+        <form onSubmit={submit}>
+          <div className="edit-item-grid">
+            {isWord ? (<>
+              <TextField label="Từ hoặc cụm từ" name="edit-term" value={fields.term} onChange={(event) => updateField('term', event.target.value)} maxLength={200} required />
+              <TextField label="Nghĩa" name="edit-translation" value={fields.translation} onChange={(event) => updateField('translation', event.target.value)} maxLength={1000} required />
+              <TextField label="Phiên âm (không bắt buộc)" name="edit-pronunciation" value={fields.pronunciation} onChange={(event) => updateField('pronunciation', event.target.value)} maxLength={300} />
+              <TextField label="Từ loại (không bắt buộc)" name="edit-part-of-speech" value={fields.partOfSpeech} onChange={(event) => updateField('partOfSpeech', event.target.value)} maxLength={80} />
+            </>) : (<>
+              <TextField label="Cấu trúc câu" name="edit-pattern" value={fields.pattern} onChange={(event) => updateField('pattern', event.target.value)} maxLength={500} required />
+              <TextField label="Ý nghĩa" name="edit-meaning" value={fields.meaning} onChange={(event) => updateField('meaning', event.target.value)} maxLength={1500} required />
+            </>)}
+            <TextField label="Ví dụ (không bắt buộc)" name="edit-example" value={fields.example} onChange={(event) => updateField('example', event.target.value)} maxLength={3000} multiline />
+            <TextField label="Ghi chú (không bắt buộc)" name="edit-notes" value={fields.notes} onChange={(event) => updateField('notes', event.target.value)} maxLength={5000} multiline />
+          </div>
+          {error && <div className="inline-alert inline-alert--error" role="alert"><CircleAlert size={18} />{error}</div>}
+          <div className="edit-item-actions">
+            <Button type="button" variant="soft" onClick={onClose} disabled={saving}>Hủy</Button>
+            <Button type="submit" loading={saving} icon={Check}>Lưu thay đổi</Button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function Toast({ message, onClose }) {
   useEffect(() => {
     const timer = window.setTimeout(onClose, 3500);
@@ -1889,9 +2000,11 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState('');
   const [profileOpen, setProfileOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
   const [toast, setToast] = useState('');
 
   const notify = useCallback((message) => setToast(message), []);
+  const closeEditingItem = useCallback(() => setEditingItem(null), []);
   const refreshStats = useCallback(() => api.getStats().then(setStats).catch(() => {}), []);
 
   const loadData = useCallback(async () => {
@@ -1998,6 +2111,16 @@ export default function App() {
     } catch (error) { notify(error.message); }
   }
 
+  async function editItem(type, item, updates) {
+    const updated = type === 'word'
+      ? await api.updateWord(item.id, updates)
+      : await api.updateStructure(item.id, updates);
+    const replace = (current) => current.map((row) => row.id === item.id ? { ...row, ...updated } : row);
+    if (type === 'word') setWords(replace); else setStructures(replace);
+    notify('Đã lưu thay đổi.');
+    return updated;
+  }
+
   async function refreshAfterImport(kind) {
     if (kind === 'structures') setStructures(await api.getStructures());
     else setWords(await api.getWords());
@@ -2023,7 +2146,7 @@ export default function App() {
   if (onboarding) return <LanguageOnboarding user={user} onSave={savePreferences} saving={preferenceLoading} error={preferenceError} />;
 
   let pageContent;
-  if (currentPage === 'library') pageContent = <LibraryPage words={words} structures={structures} loading={dataLoading} onToggleBookmark={toggleBookmark} onDelete={deleteItem} onNavigate={navigate} />;
+  if (currentPage === 'library') pageContent = <LibraryPage words={words} structures={structures} loading={dataLoading} onToggleBookmark={toggleBookmark} onEdit={(type, item) => setEditingItem({ type, item })} onDelete={deleteItem} onNavigate={navigate} />;
   else if (currentPage === 'add') pageContent = <AddHub user={user} initialTab={addTab} notify={notify} onWordCreated={(item) => { setWords((current) => [item, ...current]); refreshStats(); }} onStructureCreated={(item) => { setStructures((current) => [item, ...current]); refreshStats(); }} onImported={refreshAfterImport} />;
   else if (currentPage === 'review') pageContent = <ReviewPage words={words} structures={structures} onReviewed={reviewed} onNavigate={navigate} />;
   else if (currentPage === 'stats') pageContent = <StatsPage stats={stats} words={words} structures={structures} loading={dataLoading} />;
@@ -2036,6 +2159,7 @@ export default function App() {
         {pageContent}
       </AppShell>
       {profileOpen && <ProfilePanel user={user} onClose={() => setProfileOpen(false)} onSave={savePreferences} onLogout={logout} />}
+      {editingItem && <EditItemPanel type={editingItem.type} item={editingItem.item} onClose={closeEditingItem} onSave={editItem} />}
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
     </>
   );
