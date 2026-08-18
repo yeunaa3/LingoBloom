@@ -602,11 +602,11 @@ function insertAtCursor(inputRef, value, onChange, character) {
 function CharacterKeyboard({ language, inputRef, value, onChange, disabled = false }) {
   const [uppercase, setUppercase] = useState(false);
   const characters = LANGUAGE_CHARACTERS[language];
-  if (!characters) return null;
+  if (language !== 'de' || !characters) return null;
   const languageName = languageByCode(language).name;
   return (
-    <details className="character-keyboard">
-      <summary>Bàn phím {languageName}</summary>
+    <div className="character-keyboard">
+      <span className="character-keyboard__label">Bàn phím {languageName}</span>
       <div className="character-keyboard__panel" aria-label={`Ký tự đặc biệt ${languageName}`}>
         <button type="button" className="character-keyboard__case" aria-pressed={uppercase} onClick={() => setUppercase((current) => !current)} disabled={disabled}>Aa</button>
         {characters.map((character) => {
@@ -623,7 +623,7 @@ function CharacterKeyboard({ language, inputRef, value, onChange, disabled = fal
           );
         })}
       </div>
-    </details>
+    </div>
   );
 }
 
