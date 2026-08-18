@@ -567,15 +567,77 @@ function FormIntro({ icon: Icon, title, description }) {
   );
 }
 
-function TextField({ label, hint, multiline = false, ...props }) {
+const LANGUAGE_CHARACTERS = {
+  de: ['ä', 'ö', 'ü', 'ß'],
+  vi: [
+    'ă', 'â', 'đ', 'ê', 'ô', 'ơ', 'ư',
+    'á', 'à', 'ả', 'ã', 'ạ', 'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ', 'ấ', 'ầ', 'ẩ', 'ẫ', 'ậ',
+    'é', 'è', 'ẻ', 'ẽ', 'ẹ', 'ế', 'ề', 'ể', 'ễ', 'ệ',
+    'í', 'ì', 'ỉ', 'ĩ', 'ị',
+    'ó', 'ò', 'ỏ', 'õ', 'ọ', 'ố', 'ồ', 'ổ', 'ỗ', 'ộ', 'ớ', 'ờ', 'ở', 'ỡ', 'ợ',
+    'ú', 'ù', 'ủ', 'ũ', 'ụ', 'ứ', 'ừ', 'ử', 'ữ', 'ự',
+    'ý', 'ỳ', 'ỷ', 'ỹ', 'ỵ',
+  ],
+};
+
+function languageCharacter(character, language, uppercase) {
+  if (!uppercase) return character;
+  if (language === 'de' && character === 'ß') return 'ẞ';
+  return character.toLocaleUpperCase(language === 'de' ? 'de-DE' : 'vi-VN');
+}
+
+function insertAtCursor(inputRef, value, onChange, character) {
+  const input = inputRef.current;
+  const text = String(value || '');
+  const start = Number.isInteger(input?.selectionStart) ? input.selectionStart : text.length;
+  const end = Number.isInteger(input?.selectionEnd) ? input.selectionEnd : start;
+  const nextValue = `${text.slice(0, start)}${character}${text.slice(end)}`;
+  onChange({ target: { value: nextValue } });
+  window.requestAnimationFrame(() => {
+    input?.focus();
+    input?.setSelectionRange?.(start + character.length, start + character.length);
+  });
+}
+
+function CharacterKeyboard({ language, inputRef, value, onChange, disabled = false }) {
+  const [uppercase, setUppercase] = useState(false);
+  const characters = LANGUAGE_CHARACTERS[language];
+  if (!characters) return null;
+  const languageName = languageByCode(language).name;
+  return (
+    <details className="character-keyboard">
+      <summary>Bàn phím {languageName}</summary>
+      <div className="character-keyboard__panel" aria-label={`Ký tự đặc biệt ${languageName}`}>
+        <button type="button" className="character-keyboard__case" aria-pressed={uppercase} onClick={() => setUppercase((current) => !current)} disabled={disabled}>Aa</button>
+        {characters.map((character) => {
+          const displayed = languageCharacter(character, language, uppercase);
+          return (
+            <button
+              type="button"
+              key={`${uppercase ? 'upper' : 'lower'}-${character}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => insertAtCursor(inputRef, value, onChange, displayed)}
+              disabled={disabled}
+              aria-label={`Chèn ký tự ${displayed}`}
+            >{displayed}</button>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function TextField({ label, hint, multiline = false, language, ...props }) {
   const id = props.id || props.name;
   const Input = multiline ? 'textarea' : 'input';
+  const inputRef = useRef(null);
   return (
-    <label className="field" htmlFor={id}>
-      <span className="field__label">{label}{props.required && <b aria-hidden="true"> *</b>}</span>
-      <Input id={id} {...props} />
+    <div className="field">
+      <label className="field__label" htmlFor={id}>{label}{props.required && <b aria-hidden="true"> *</b>}</label>
+      <Input ref={inputRef} id={id} lang={language} {...props} />
+      <CharacterKeyboard language={language} inputRef={inputRef} value={props.value} onChange={props.onChange} disabled={props.disabled} />
       {hint && <small className="field__hint">{hint}</small>}
-    </label>
+    </div>
   );
 }
 
@@ -625,6 +687,8 @@ const EMPTY_MANUAL_WORD = {
 };
 
 function ManualWordForm({ user, onCreated, notify }) {
+  const learningLanguage = userLanguage(user, 'learningLanguage', 'en');
+  const nativeLanguage = userLanguage(user, 'nativeLanguage', 'vi');
   const [fields, setFields] = useState({ ...EMPTY_MANUAL_WORD });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -653,8 +717,8 @@ function ManualWordForm({ user, onCreated, notify }) {
         partOfSpeech: fields.partOfSpeech.trim(),
         example: fields.example.trim(),
         notes: fields.notes.trim(),
-        language: userLanguage(user, 'learningLanguage', 'en'),
-        nativeLanguage: userLanguage(user, 'nativeLanguage', 'vi'),
+        language: learningLanguage,
+        nativeLanguage,
         source: 'manual',
       });
       onCreated(created);
@@ -671,11 +735,11 @@ function ManualWordForm({ user, onCreated, notify }) {
     <form onSubmit={submit} className="manual-word-form">
       <FormIntro icon={FileText} title="Nhập từ hoặc cụm từ" description="Phù hợp với cụm từ, thành ngữ hoặc nội dung không có trong từ điển. Chỉ từ/cụm từ và nghĩa là bắt buộc." />
       <div className="manual-word-grid">
-        <TextField label="Từ hoặc cụm từ" name="term" value={fields.term} onChange={(event) => updateField('term', event.target.value)} maxLength="200" required placeholder="Ví dụ: auf jeden Fall" autoFocus />
-        <TextField label="Nghĩa" name="translation" value={fields.translation} onChange={(event) => updateField('translation', event.target.value)} maxLength="1000" required placeholder="Ví dụ: trong mọi trường hợp, chắc chắn" />
+        <TextField label="Từ hoặc cụm từ" name="term" language={learningLanguage} value={fields.term} onChange={(event) => updateField('term', event.target.value)} maxLength="200" required placeholder="Ví dụ: auf jeden Fall" autoFocus />
+        <TextField label="Nghĩa" name="translation" language={nativeLanguage} value={fields.translation} onChange={(event) => updateField('translation', event.target.value)} maxLength="1000" required placeholder="Ví dụ: trong mọi trường hợp, chắc chắn" />
         <TextField label="Phiên âm (không bắt buộc)" name="pronunciation" value={fields.pronunciation} onChange={(event) => updateField('pronunciation', event.target.value)} maxLength="300" placeholder="Ví dụ: /aʊ̯f ˈjeːdn̩ fal/" />
         <TextField label="Từ loại (không bắt buộc)" name="partOfSpeech" value={fields.partOfSpeech} onChange={(event) => updateField('partOfSpeech', event.target.value)} maxLength="80" placeholder="Ví dụ: cụm trạng từ" />
-        <TextField label="Ví dụ (không bắt buộc)" name="example" value={fields.example} onChange={(event) => updateField('example', event.target.value)} maxLength="3000" multiline placeholder="Ví dụ sử dụng trong câu" />
+        <TextField label="Ví dụ (không bắt buộc)" name="example" language={learningLanguage} value={fields.example} onChange={(event) => updateField('example', event.target.value)} maxLength="3000" multiline placeholder="Ví dụ sử dụng trong câu" />
         <TextField label="Ghi chú (không bắt buộc)" name="notes" value={fields.notes} onChange={(event) => updateField('notes', event.target.value)} maxLength="5000" multiline placeholder="Mẹo nhớ hoặc ngữ cảnh riêng của bạn" />
       </div>
       {error && <div className="inline-alert inline-alert--error" role="alert"><CircleAlert size={18} />{error}</div>}
@@ -697,6 +761,8 @@ function DictionaryWordForm({ user, onCreated, notify }) {
   const [error, setError] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
   const requestSequence = useRef(0);
+  const queryInputRef = useRef(null);
+  const meaningInputRef = useRef(null);
   const listboxId = 'word-dictionary-suggestions';
   const trimmedQuery = query.trim();
   const trimmedMeaning = meaningQuery.trim();
@@ -810,13 +876,15 @@ function DictionaryWordForm({ user, onCreated, notify }) {
     <form onSubmit={submit} className="word-typeahead-form">
       <FormIntro icon={BookOpen} title="Thêm từ bằng từ điển" description="Gõ từ đang học và có thể thêm nghĩa bạn muốn để tìm đúng từ nhanh hơn." />
       <div className="word-typeahead">
-        <label className="field" htmlFor="word-typeahead-input">
-          <span className="field__label">Từ bạn muốn thêm <b aria-hidden="true">*</b></span>
+        <div className="field">
+          <label className="field__label" htmlFor="word-typeahead-input">Từ bạn muốn thêm <b aria-hidden="true">*</b></label>
           <span className="typeahead-input-wrap">
             <Search size={19} aria-hidden="true" />
             <input
+              ref={queryInputRef}
               id="word-typeahead-input"
               type="text"
+              lang={learningLanguage}
               value={query}
               onChange={(event) => changeQuery(event.target.value)}
               onKeyDown={handleInputKeyDown}
@@ -832,23 +900,27 @@ function DictionaryWordForm({ user, onCreated, notify }) {
             />
             {loading && <LoaderCircle className="spin" size={18} aria-label="Đang tìm gợi ý" />}
           </span>
+          <CharacterKeyboard language={learningLanguage} inputRef={queryInputRef} value={query} onChange={(event) => changeQuery(event.target.value)} disabled={saving} />
           <small className="field__hint" id="word-typeahead-help">
             {languageByCode(learningLanguage).name} → {languageByCode(nativeLanguage).name} · Gõ ít nhất 2 ký tự.
           </small>
-        </label>
+        </div>
 
-        <label className="field typeahead-meaning-hint" htmlFor="word-meaning-hint">
-          <span className="field__label">Nghĩa bạn muốn <small>(không bắt buộc)</small></span>
+        <div className="field typeahead-meaning-hint">
+          <label className="field__label" htmlFor="word-meaning-hint">Nghĩa bạn muốn <small>(không bắt buộc)</small></label>
           <input
+            ref={meaningInputRef}
             id="word-meaning-hint"
             type="text"
+            lang={nativeLanguage}
             value={meaningQuery}
             onChange={(event) => changeMeaning(event.target.value)}
             placeholder={`Ví dụ bằng ${languageByCode(nativeLanguage).name}: cùng nhau`}
             autoComplete="off"
           />
+          <CharacterKeyboard language={nativeLanguage} inputRef={meaningInputRef} value={meaningQuery} onChange={(event) => changeMeaning(event.target.value)} disabled={saving} />
           <small className="field__hint">Hệ thống dùng nghĩa này để ưu tiên từ phù hợp; từ vẫn được xác thực trước khi lưu.</small>
-        </label>
+        </div>
 
         {!selected && suggestions.length > 0 && (
           <div className="typeahead-menu" id={listboxId} role="listbox" aria-label="Gợi ý từ từ điển">
@@ -899,6 +971,8 @@ function DictionaryWordForm({ user, onCreated, notify }) {
 }
 
 function StructureForm({ user, onCreated, notify }) {
+  const learningLanguage = userLanguage(user, 'learningLanguage', 'en');
+  const nativeLanguage = userLanguage(user, 'nativeLanguage', 'vi');
   const initial = { pattern: '', meaning: '', example: '', notes: '' };
   const [form, setForm] = useState(initial);
   const [loading, setLoading] = useState(false);
@@ -910,8 +984,8 @@ function StructureForm({ user, onCreated, notify }) {
     try {
       const created = await api.createStructure({
         ...form,
-        learningLanguage: userLanguage(user, 'learningLanguage', 'en'),
-        nativeLanguage: userLanguage(user, 'nativeLanguage', 'vi'),
+        learningLanguage,
+        nativeLanguage,
       });
       onCreated(created); setForm(initial); notify('Đã lưu cấu trúc mới.');
     } catch (caught) { setError(caught.message); }
@@ -921,9 +995,9 @@ function StructureForm({ user, onCreated, notify }) {
   return (
     <form onSubmit={submit}>
       <FormIntro icon={FileText} title="Thêm một cấu trúc câu" description="Ghi lại công thức và một ví dụ thật gần với cách bạn dùng." />
-      <TextField name="pattern" label="Cấu trúc" placeholder="Ví dụ: be used to + V-ing" value={form.pattern} onChange={(e) => update('pattern', e.target.value)} required autoFocus />
-      <TextField name="meaning" label="Ý nghĩa / cách dùng" placeholder="Quen với việc gì" value={form.meaning} onChange={(e) => update('meaning', e.target.value)} required />
-      <TextField name="structureExample" label="Câu ví dụ" placeholder="I am used to waking up early." value={form.example} onChange={(e) => update('example', e.target.value)} multiline rows="3" />
+      <TextField name="pattern" label="Cấu trúc" language={learningLanguage} placeholder="Ví dụ: be used to + V-ing" value={form.pattern} onChange={(e) => update('pattern', e.target.value)} required autoFocus />
+      <TextField name="meaning" label="Ý nghĩa / cách dùng" language={nativeLanguage} placeholder="Quen với việc gì" value={form.meaning} onChange={(e) => update('meaning', e.target.value)} required />
+      <TextField name="structureExample" label="Câu ví dụ" language={learningLanguage} placeholder="I am used to waking up early." value={form.example} onChange={(e) => update('example', e.target.value)} multiline rows="3" />
       <TextField name="structureNotes" label="Ghi chú" placeholder="Điểm dễ nhầm hoặc biến thể của cấu trúc…" value={form.notes} onChange={(e) => update('notes', e.target.value)} multiline rows="3" />
       {error && <div className="inline-alert inline-alert--error" role="alert"><CircleAlert size={18} />{error}</div>}
       <div className="form-actions"><Button type="submit" loading={loading} icon={Plus}>Lưu cấu trúc</Button></div>
@@ -1230,6 +1304,7 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
   const [typedResult, setTypedResult] = useState(null);
   const selectionTouched = useRef(false);
   const typedSubmission = useRef('');
+  const typedAnswerInputRef = useRef(null);
   const card = deck[index];
   const typedContent = card && sessionStyle === 'typed' ? quizCardContent(card, sessionDirection) : null;
 
@@ -1672,11 +1747,13 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
               <small>{sessionDirection?.answerField === 'translation' ? 'Hãy gõ nghĩa tương ứng' : 'Hãy gõ từ tương ứng'}</small>
               <h2 id="typed-quiz-prompt">{typedContent?.prompt}</h2>
             </div>
-            <label className="typed-quiz__answer" htmlFor={`typed-answer-${card.id}`}>
-              <span>Trả lời bằng {languageByCode(sessionDirection?.answerLanguage).name}</span>
+            <div className="typed-quiz__answer">
+              <label htmlFor={`typed-answer-${card.id}`}>Trả lời bằng {languageByCode(sessionDirection?.answerLanguage).name}</label>
               <input
+                ref={typedAnswerInputRef}
                 key={card.id}
                 id={`typed-answer-${card.id}`}
+                lang={sessionDirection?.answerLanguage}
                 value={typedAnswer}
                 onChange={(event) => setTypedAnswer(event.target.value)}
                 placeholder={`Nhập đáp án bằng ${languageByCode(sessionDirection?.answerLanguage).name}…`}
@@ -1686,7 +1763,14 @@ function ReviewPage({ words, structures, onReviewed, onNavigate }) {
                 aria-invalid={typedResult ? !typedResult.correct : undefined}
                 autoFocus
               />
-            </label>
+              <CharacterKeyboard
+                language={sessionDirection?.answerLanguage}
+                inputRef={typedAnswerInputRef}
+                value={typedAnswer}
+                onChange={(event) => setTypedAnswer(event.target.value)}
+                disabled={Boolean(typedResult) || submitting}
+              />
+            </div>
 
             {typedResult && (
               <div className={`typed-feedback ${typedResult.correct ? 'is-correct' : 'is-incorrect'}`} role="status" aria-live="polite">
@@ -1871,8 +1955,10 @@ function ProfilePanel({ user, onClose, onSave, onLogout }) {
   );
 }
 
-function EditItemPanel({ type, item, onClose, onSave }) {
+function EditItemPanel({ type, item, user, onClose, onSave }) {
   const isWord = type === 'word';
+  const learningLanguage = item.learningLanguage || item.language || userLanguage(user, 'learningLanguage', 'en');
+  const nativeLanguage = item.nativeLanguage || userLanguage(user, 'nativeLanguage', 'vi');
   const [fields, setFields] = useState(isWord ? {
     term: item.term || '',
     translation: item.translation || '',
@@ -1953,15 +2039,15 @@ function EditItemPanel({ type, item, onClose, onSave }) {
         <form onSubmit={submit}>
           <div className="edit-item-grid">
             {isWord ? (<>
-              <TextField label="Từ hoặc cụm từ" name="edit-term" value={fields.term} onChange={(event) => updateField('term', event.target.value)} maxLength={200} required />
-              <TextField label="Nghĩa" name="edit-translation" value={fields.translation} onChange={(event) => updateField('translation', event.target.value)} maxLength={1000} required />
+              <TextField label="Từ hoặc cụm từ" name="edit-term" language={learningLanguage} value={fields.term} onChange={(event) => updateField('term', event.target.value)} maxLength={200} required />
+              <TextField label="Nghĩa" name="edit-translation" language={nativeLanguage} value={fields.translation} onChange={(event) => updateField('translation', event.target.value)} maxLength={1000} required />
               <TextField label="Phiên âm (không bắt buộc)" name="edit-pronunciation" value={fields.pronunciation} onChange={(event) => updateField('pronunciation', event.target.value)} maxLength={300} />
               <TextField label="Từ loại (không bắt buộc)" name="edit-part-of-speech" value={fields.partOfSpeech} onChange={(event) => updateField('partOfSpeech', event.target.value)} maxLength={80} />
             </>) : (<>
-              <TextField label="Cấu trúc câu" name="edit-pattern" value={fields.pattern} onChange={(event) => updateField('pattern', event.target.value)} maxLength={500} required />
-              <TextField label="Ý nghĩa" name="edit-meaning" value={fields.meaning} onChange={(event) => updateField('meaning', event.target.value)} maxLength={1500} required />
+              <TextField label="Cấu trúc câu" name="edit-pattern" language={learningLanguage} value={fields.pattern} onChange={(event) => updateField('pattern', event.target.value)} maxLength={500} required />
+              <TextField label="Ý nghĩa" name="edit-meaning" language={nativeLanguage} value={fields.meaning} onChange={(event) => updateField('meaning', event.target.value)} maxLength={1500} required />
             </>)}
-            <TextField label="Ví dụ (không bắt buộc)" name="edit-example" value={fields.example} onChange={(event) => updateField('example', event.target.value)} maxLength={3000} multiline />
+            <TextField label="Ví dụ (không bắt buộc)" name="edit-example" language={learningLanguage} value={fields.example} onChange={(event) => updateField('example', event.target.value)} maxLength={3000} multiline />
             <TextField label="Ghi chú (không bắt buộc)" name="edit-notes" value={fields.notes} onChange={(event) => updateField('notes', event.target.value)} maxLength={5000} multiline />
           </div>
           {error && <div className="inline-alert inline-alert--error" role="alert"><CircleAlert size={18} />{error}</div>}
@@ -2159,7 +2245,7 @@ export default function App() {
         {pageContent}
       </AppShell>
       {profileOpen && <ProfilePanel user={user} onClose={() => setProfileOpen(false)} onSave={savePreferences} onLogout={logout} />}
-      {editingItem && <EditItemPanel type={editingItem.type} item={editingItem.item} onClose={closeEditingItem} onSave={editItem} />}
+      {editingItem && <EditItemPanel type={editingItem.type} item={editingItem.item} user={user} onClose={closeEditingItem} onSave={editItem} />}
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
     </>
   );

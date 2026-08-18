@@ -647,6 +647,65 @@ svg {
   font-size: 11px;
 }
 
+.character-keyboard {
+  min-width: 0;
+  margin-top: -1px;
+}
+
+.character-keyboard summary {
+  width: fit-content;
+  min-height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--pink-700);
+  border-radius: 10px;
+  background: var(--pink-50);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 800;
+  list-style: none;
+  user-select: none;
+}
+
+.character-keyboard summary::-webkit-details-marker { display: none; }
+.character-keyboard summary::before { content: '⌨'; margin-right: 6px; font-size: 14px; }
+.character-keyboard[open] summary { color: var(--pink-900); background: var(--pink-100); }
+
+.character-keyboard__panel {
+  max-height: 184px;
+  margin-top: 7px;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fffafb;
+}
+
+.character-keyboard__panel button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  border: 1px solid #eadde3;
+  border-radius: 11px;
+  background: #fff;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.character-keyboard__panel button:hover,
+.character-keyboard__panel button:focus-visible { color: var(--pink-900); border-color: var(--pink-400); background: var(--pink-50); outline: none; }
+.character-keyboard__panel button:active { transform: translateY(1px); }
+.character-keyboard__panel button:disabled { opacity: .45; }
+.character-keyboard__panel .character-keyboard__case { color: var(--pink-800, #8d365c); background: var(--pink-100); font-size: 12px; }
+
 .select-wrap {
   position: relative;
   display: block;
@@ -2381,6 +2440,8 @@ svg {
 .typed-quiz__prompt h2 { margin: 10px auto 0; max-width: 630px; overflow-wrap: anywhere; font-family: Georgia, serif; font-size: clamp(29px, 10vw, 48px); line-height: 1.12; letter-spacing: -1px; }
 
 .typed-quiz__answer { width: min(100%, 560px); margin: 0 auto; display: grid; gap: 7px; color: #62565e; font-size: 10.5px; font-weight: 800; }
+.typed-quiz__answer > label { color: #62565e; font-size: 10.5px; font-weight: 800; }
+.typed-quiz__answer .character-keyboard { text-align: left; }
 .typed-quiz__answer input { width: 100%; min-height: 53px; padding: 0 14px; color: var(--ink); border: 1px solid var(--border); border-radius: 15px; background: #fff; font: inherit; font-size: 16px; text-align: center; }
 .typed-quiz__answer input:focus { outline: none; border-color: var(--pink-500); box-shadow: 0 0 0 4px rgba(226, 135, 171, .13); }
 .typed-quiz__answer input[aria-invalid="true"] { border-color: #d88792; }
